@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from . import media
 from .auth import LOGIN_COOKIE, SESSION_COOKIE, Session, verify_password
 from .deps import AppState, app_state, get_store, require_admin
 from .repo import Store
@@ -107,4 +109,48 @@ def players_page(
         session,
         players=store.list_players(),
         playlists=store.list_playlists(),
+    )
+
+
+# ------------------------------------------------------------------ media
+
+
+@router.get("/media", response_class=HTMLResponse)
+def media_page(
+    request: Request,
+    session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> HTMLResponse:
+    return render(request, "media.html", session, media=store.list_media())
+
+
+@router.put("/media/upload")
+async def upload_media(
+    request: Request,
+    filename: str = Query(..., max_length=255),
+    _session: Session = Depends(require_admin),
+    state: AppState = Depends(app_state),
+    store: Store = Depends(get_store),
+) -> JSONResponse:
+    """Raw-body streaming upload (sent by app.js with fetch)."""
+    try:
+        tmp, sha256, size = await media.receive_upload(request.stream(), state.settings)
+        media_id, duplicate = await run_in_threadpool(
+            media.ingest, store, state.settings, tmp, sha256, size, filename
+        )
+    except media.Rejected as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+    return JSONResponse({"id": media_id, "sha256": sha256, "duplicate": duplicate})
+
+
+@router.post("/media/{media_id}/delete")
+def delete_media(
+    media_id: int,
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    store.delete_media(media_id)
+    return redirect(
+        "/media",
+        notice="Media removed from the library. Playlists using it keep playing it.",
     )

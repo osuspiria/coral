@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Media{% endblock %}
+{% block content %}
+<h1>Media</h1>
+<div class="card">
+  <h2>Upload</h2>
+  <p class="muted">Images: JPEG, PNG or WebP up to 4096 px. Videos: H.264 or HEVC in MP4/MOV/MKV,
+    up to 1920×1080 and 30 fps. Files outside this profile are rejected.</p>
+  <div class="row">
+    <input type="file" id="upload-files" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/x-matroska">
+    <button type="button" id="upload-start">Upload</button>
+  </div>
+  <ul id="upload-log"></ul>
+</div>
+<table>
+  <thead><tr><th>Name</th><th>Kind</th><th>Details</th><th>Size</th><th>Used in</th><th></th></tr></thead>
+  <tbody>
+  {% for m in media %}
+    <tr>
+      <td>{{ m.original_name }}<br><span class="muted mono">{{ m.sha256[:12] }}</span></td>
+      <td>{{ m.kind }}</td>
+      <td>{{ m.width }}×{{ m.height }} {{ m.codec }}{% if m.duration_s %} · {{ "%.1f"|format(m.duration_s) }} s{% endif %}</td>
+      <td>{{ "%.1f"|format(m.size / 1048576) }} MB</td>
+      <td>{{ m.uses }} item(s)</td>
+      <td>
+        <form method="post" action="/media/{{ m.id }}/delete" class="inline"
+              data-confirm="Remove {{ m.original_name }} from the library?{% if m.uses %} Playlists that use it will keep playing it until you remove those items.{% endif %}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">No media yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
