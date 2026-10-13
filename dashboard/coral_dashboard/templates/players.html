@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Players{% endblock %}
+{% block content %}
+<h1>Players</h1>
+<table>
+  <thead><tr><th>ID</th><th>Label</th><th>Location</th><th>Playlist</th><th>Screen</th></tr></thead>
+  <tbody>
+  {% for p in players %}
+    <tr>
+      <td>{{ p.id }}</td>
+      <td>{{ p.label }}{% if p.revoked %} <span class="badge bad">revoked</span>{% endif %}</td>
+      <td>{{ p.location }}</td>
+      <td>{{ p.playlist_name or "—" }}</td>
+      <td>{% if p.cleared %}<span class="badge warn">cleared</span>{% else %}normal{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No players yet. Create one with <code>signagectl player add</code>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

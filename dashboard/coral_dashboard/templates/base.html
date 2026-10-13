@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{% block title %}CORAL{% endblock %} · CORAL</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <strong class="brand">CORAL</strong>
+    {% if logged_in %}
+    <nav>
+      <a href="/players">Players</a>
+      <a href="/playlists">Playlists</a>
+      <a href="/media">Media</a>
+    </nav>
+    <form method="post" action="/logout" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="link">Log out</button>
+    </form>
+    {% endif %}
+  </header>
+  <main>
+    {% if notice %}<p class="msg notice">{{ notice }}</p>{% endif %}
+    {% if error %}<p class="msg error">{{ error }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

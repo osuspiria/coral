@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<form method="post" action="/login" class="card narrow">
+  <h1>Log in</h1>
+  <input type="hidden" name="csrf_token" value="{{ login_csrf }}">
+  <label>Password <input type="password" name="password" autocomplete="current-password" required autofocus></label>
+  <button type="submit">Log in</button>
+</form>
+{% endblock %}
