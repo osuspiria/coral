@@ -134,3 +134,75 @@ def test_player_follows_assigned_playlist(dashboard, tmp_path):
             await mpv.stop()
 
     asyncio.run(scenario())
+
+
+def test_status_and_sync_now(dashboard, tmp_path):
+    """Phase 2 acceptance, automated: the dashboard shows a reliable status and
+    sync-now works (it repairs a file that a normal heartbeat would not notice)."""
+    from datetime import UTC, datetime
+
+    url, store, settings = dashboard
+    playlist = store.create_playlist("Loja")
+    store.add_item(playlist, add_file(store, settings, 1))
+    player = store.create_player("pombal", hash_token("e2e-token"), playlist_id=playlist)
+
+    async def scenario():
+        mpv = await FakeMpv().start()
+        config = Config(
+            server_url=url,
+            data_dir=tmp_path / "pi",
+            mpv_ipc=mpv.address,
+            min_free_mb=0,
+            full_check_interval_s=3600,
+            fallback_image=tmp_path / "fallback.png",
+        )
+        agent = Agent(
+            config,
+            ServerClient(url, "e2e-token", 5),
+            HeartbeatChangeSource(3600, Backoff(0.1, 0.5)),
+            heartbeat_interval_override=0.2,
+        )
+        task = asyncio.create_task(agent.run())
+        sha = hashlib.sha256(blob(1)).hexdigest()
+        media_file = tmp_path / "pi" / "media" / f"{sha}.png"
+
+        async def wait_for(predicate, timeout=15):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if predicate():
+                    return
+                await asyncio.sleep(0.05)
+            raise AssertionError("timed out")
+
+        def status():
+            return store.player_status(store.get_player(player), datetime.now(UTC), 60)
+
+        try:
+            # 1. Online, in sync and reporting playback and system data.
+            await wait_for(lambda: status().online and status().in_sync)
+            report = status().state
+            assert report["mpv"]["state"] == "playing"
+            assert report["agent_version"]
+            assert report["system"]["disk_free_mb"] is not None
+
+            # 2. A file disappears from the player's disk: a normal heartbeat sees the
+            #    same hash and does nothing; sync-now runs a full check and repairs it.
+            media_file.unlink()
+            await asyncio.sleep(1)
+            assert not media_file.exists()
+            command = store.queue_command(player, "sync-now")
+            await wait_for(media_file.exists)
+            await wait_for(lambda: store.list_commands(player)[0]["acked_at"] is not None)
+            assert store.list_commands(player)[0]["id"] == command
+
+            # 3. Clear screen is visible in the reported state.
+            store.set_cleared(player, True)
+            await wait_for(lambda: status().state.get("cleared") is True)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            await agent.ipc.close()
+            await mpv.stop()
+
+    asyncio.run(scenario())
