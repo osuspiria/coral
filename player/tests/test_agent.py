@@ -31,11 +31,27 @@ class Clock:
         return self.value
 
 
+class FakeActions:
+    """Records restart-player / reboot instead of calling systemctl."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def restart_mpv(self) -> bool:
+        self.calls.append("restart_mpv")
+        return True
+
+    async def reboot(self) -> bool:
+        self.calls.append("reboot")
+        return True
+
+
 class Harness:
     def __init__(self, tmp_path, server: FakeServer, mpv: FakeMpv, clock: Clock) -> None:
         self.tmp_path, self.server, self.mpv, self.clock = tmp_path, server, mpv, clock
         self.agent: Agent | None = None
         self._mpv_task: asyncio.Task | None = None
+        self.actions = FakeActions()
 
     def config(self) -> Config:
         return Config(
@@ -53,7 +69,12 @@ class Harness:
         client = ServerClient(self.server.url, token, 5)
         changes = PollingChangeSource(60, 900, Backoff(5, 900))
         self.agent = Agent(
-            self.config(), client, changes, now=self.clock, build_date=date(2026, 1, 1)
+            self.config(),
+            client,
+            changes,
+            now=self.clock,
+            build_date=date(2026, 1, 1),
+            actions=self.actions,
         )
         await self.agent.evaluate()
         self._mpv_task = asyncio.create_task(self.agent.mpv_loop())
@@ -465,5 +486,54 @@ def test_no_valid_items_today_waits_for_current_item(scenario):
         assert (await h.playlist()) == [h.file(1), h.fallback]
         h.mpv.finish_current()
         assert (await h.playlist()) == [h.fallback]
+
+    scenario(body)
+
+
+# ------------------------------------------------------------- mpv health
+
+
+def test_stuck_mpv_is_restarted_and_reported(scenario):
+    async def body(h):
+        h.publish(1, (2, {"kind": "video", "ext": "mp4", "duration": 12.5}))
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        await h.settle()
+        await agent.check_mpv_health()  # first look: records the current file
+        assert agent.health.report().state == "playing"
+
+        agent.health._last_progress -= 1000  # nothing moved for a long time
+        await agent.check_mpv_health()
+        assert h.actions.calls == ["restart_mpv"]
+        report = agent.health.report()
+        assert (report.state, report.restarts) == ("stuck", 1)
+
+    scenario(body)
+
+
+def test_advancing_mpv_is_not_restarted(scenario):
+    async def body(h):
+        h.publish((1, {"kind": "video", "ext": "mp4", "duration": 600}))
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        for pos in (1.0, 2.0, 3.0):
+            h.mpv.time_pos = pos
+            agent.health._last_progress -= 1000
+            await agent.check_mpv_health()
+        assert h.actions.calls == []
+
+    scenario(body)
+
+
+def test_idle_mpv_gets_the_list_again(scenario):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        h.mpv.playlist.clear()
+        h.mpv.current = None  # mpv went idle (e.g. the playlist was cleared by hand)
+        await agent.check_mpv_health()
+        assert (await h.playlist()) == [h.file(1)]
+        assert h.actions.calls == []
 
     scenario(body)

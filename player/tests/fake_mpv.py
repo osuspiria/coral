@@ -40,6 +40,7 @@ class FakeMpv:
     _writers: list[asyncio.StreamWriter] = field(default_factory=list)
     _server: asyncio.base_events.Server | None = None
     port: int = 0
+    time_pos: float | None = None  # what "time-pos" answers; tests move it forward
 
     async def start(self, initial: list[str] | None = None) -> FakeMpv:
         for name in initial or []:
@@ -150,6 +151,12 @@ class FakeMpv:
                 }
                 for i, e in enumerate(self.playlist)
             ]
+        if name == "time-pos":
+            if self.current_entry is None or self.time_pos is None:
+                raise Unavailable("property unavailable")
+            return self.time_pos
+        if name == "idle-active":
+            return self.current_entry is None
         if name == "path":
             if self.current_entry is None:
                 raise Unavailable("property unavailable")

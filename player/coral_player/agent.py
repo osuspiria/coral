@@ -19,6 +19,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -27,6 +28,7 @@ from .client import ServerClient, ServerError, Unauthorized, utc_now
 from .clock import ClockGuard
 from .config import Config
 from .fsutil import atomic_write_json, read_json
+from .health import MpvHealth
 from .manifest import Action, EmptyManifest, InvalidManifest, Manifest, parse_manifest
 from .mpv_controller import MpvController
 from .mpv_ipc import MpvError, MpvIpc
@@ -34,11 +36,13 @@ from .schedule import active_entries, local_today, seconds_until_next_evaluation
 from .sdnotify import notify
 from .state import PlayEntry, StateStore
 from .sync import MediaCache, SyncError
+from .system import SystemActions
 
 log = logging.getLogger(__name__)
 
 DEFAULT_TZ = ZoneInfo("Europe/Lisbon")
 WATCHDOG_PING_S = 10
+HEALTH_CHECK_S = 10
 
 
 class Agent:
@@ -50,6 +54,7 @@ class Agent:
         *,
         now: Callable[[], datetime] = utc_now,
         build_date: date | None = None,
+        actions: SystemActions | None = None,
     ) -> None:
         self.config = config
         self.client = client
@@ -69,6 +74,8 @@ class Agent:
         # Set by an explicit clear: the fallback replaces the current item at once.
         self._interrupt_pending = False
         self.mpv_ready = asyncio.Event()
+        self.health = MpvHealth()
+        self.actions = actions or SystemActions()
 
     # ------------------------------------------------------------- manifest
 
@@ -211,6 +218,7 @@ class Agent:
 
     def _on_mpv_event(self, event: dict[str, Any]) -> None:
         if event.get("event") == "start-file":
+            self.health.on_start_file()
             task = asyncio.get_running_loop().create_task(
                 self.controller.remove_stale(event.get("playlist_entry_id"))
             )
@@ -229,12 +237,60 @@ class Agent:
                 continue
             delay = 1.0
             log.info("Connected to mpv")
+            self.health.on_connect()
             self.controller.reset()  # mpv may have restarted with only the fallback
             await self._push()
             self.mpv_ready.set()
             await self.ipc.closed.wait()
             self.mpv_ready.clear()
+            self.health.on_disconnect()
             log.warning("Lost the mpv connection; reconnecting")
+
+    def _current_image_duration(self) -> float | None:
+        current = self.health.current_file
+        if current is None:
+            return None
+        if current == self.config.fallback_image.name:
+            return float(self.config.fallback_duration_s)
+        for entry in self.state.playing:
+            if entry.filename == current:
+                return entry.duration
+        return None
+
+    async def _optional_property(self, name: str) -> Any:
+        try:
+            return await self.ipc.get_property(name)
+        except MpvError:
+            return None  # e.g. "property unavailable" while idle
+
+    async def check_mpv_health(self) -> None:
+        """Spec 4.6: restart mpv when the screen stops changing; reload an idle mpv."""
+        if not self.ipc.connected:
+            return
+        time_pos = await self._optional_property("time-pos")
+        path = await self._optional_property("path")
+        idle = bool(await self._optional_property("idle-active"))
+        self.health.observe(time_pos, Path(path).name if path else None, idle)
+        if idle:
+            log.warning("mpv is idle; reloading the play list")
+            self.controller.reset()
+            await self._push()
+        elif self.health.is_stalled(self._current_image_duration()):
+            log.error(
+                "mpv shows no progress for %.0f s; restarting mpv.service",
+                self.health.seconds_without_progress(),
+            )
+            self.health.mark_restarted()
+            if not await self.actions.restart_mpv():
+                log.error("Could not restart mpv.service (check the polkit rule)")
+
+    async def health_loop(self) -> None:
+        while True:
+            await asyncio.sleep(HEALTH_CHECK_S)
+            try:
+                await self.check_mpv_health()
+            except Exception:
+                log.exception("Unexpected error while checking mpv health")
 
     # ---------------------------------------------------------------- loops
 
@@ -268,5 +324,9 @@ class Agent:
         await self.evaluate()  # restore the persisted list before any network
         notify("READY=1")
         await asyncio.gather(
-            self.mpv_loop(), self.sync_loop(), self.schedule_loop(), self.watchdog_loop()
+            self.mpv_loop(),
+            self.sync_loop(),
+            self.schedule_loop(),
+            self.watchdog_loop(),
+            self.health_loop(),
         )
