@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import UTC, datetime
 from email.utils import format_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -14,6 +15,9 @@ class FakeServer:
         self.token = token
         self.manifest: dict[str, Any] | None = None
         self.manifest_status = 200  # set to 404/500 to simulate failures
+        self.heartbeat_status = 200
+        self.heartbeats: list[dict[str, Any]] = []  # bodies received
+        self.commands: list[dict[str, Any]] = []  # sent until acked
         self.files: dict[str, bytes] = {}
         self.corrupt: set[str] = set()  # serve wrong bytes for these sha256
         self.cut_after: dict[str, int] = {}  # close the connection after N bytes (once)
@@ -57,6 +61,31 @@ class FakeServer:
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            def do_POST(self):  # noqa: N802
+                fake.requests.append((self.path, dict(self.headers)))
+                if self.headers.get("Authorization") != f"Bearer {fake.token}":
+                    return self._send(401)
+                if self.path != "/api/v1/heartbeat":
+                    return self._send(404)
+                length = int(self.headers.get("Content-Length", "0"))
+                body = json.loads(self.rfile.read(length))
+                fake.heartbeats.append(body)
+                if fake.heartbeat_status != 200:
+                    return self._send(fake.heartbeat_status)
+                acked = set(body.get("acked_commands", []))
+                fake.commands = [c for c in fake.commands if c["id"] not in acked]
+                now = fake.server_time() if callable(fake.server_time) else fake.server_time
+                answer = {
+                    "server_time": (now or datetime.now(UTC)).isoformat(),
+                    "playlist_hash": (fake.manifest or {}).get("playlist_hash"),
+                    "desired_version": None,
+                    "commands": list(fake.commands),
+                    "heartbeat_interval_s": 60,
+                }
+                return self._send(
+                    200, json.dumps(answer).encode(), {"Content-Type": "application/json"}
+                )
 
             def do_GET(self):  # noqa: N802
                 fake.requests.append((self.path, dict(self.headers)))

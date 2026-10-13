@@ -20,7 +20,7 @@ from coral_dashboard.db import connect
 from coral_dashboard.main import create_app
 from coral_dashboard.repo import Store
 from coral_player.agent import Agent
-from coral_player.changes import Backoff, PollingChangeSource
+from coral_player.changes import Backoff, HeartbeatChangeSource
 from coral_player.client import ServerClient
 from coral_player.config import Config
 from dash_helpers import make_settings
@@ -83,12 +83,13 @@ def test_player_follows_assigned_playlist(dashboard, tmp_path):
             data_dir=tmp_path / "pi",
             mpv_ipc=mpv.address,
             min_free_mb=0,
-            poll_interval_s=0.2,
             full_check_interval_s=3600,
             fallback_image=tmp_path / "fallback.png",
         )
-        changes = PollingChangeSource(0.2, 3600, Backoff(0.1, 0.5))
-        agent = Agent(config, ServerClient(url, "e2e-token", 5), changes)
+        changes = HeartbeatChangeSource(3600, Backoff(0.1, 0.5))
+        agent = Agent(
+            config, ServerClient(url, "e2e-token", 5), changes, heartbeat_interval_override=0.2
+        )
         task = asyncio.create_task(agent.run())
         media = tmp_path / "pi" / "media"
 

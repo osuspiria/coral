@@ -17,14 +17,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .changes import ChangeSource, SyncTrigger
-from .client import ServerClient, ServerError, Unauthorized, utc_now
+from . import __version__
+from .changes import Backoff, ChangeSource, SyncTrigger
+from .client import HeartbeatResponse, ServerClient, ServerError, Unauthorized, utc_now
 from .clock import ClockGuard
 from .config import Config
 from .fsutil import atomic_write_json, read_json
@@ -36,13 +38,14 @@ from .schedule import active_entries, local_today, seconds_until_next_evaluation
 from .sdnotify import notify
 from .state import PlayEntry, StateStore
 from .sync import MediaCache, SyncError
-from .system import SystemActions
+from .system import SystemActions, system_report
 
 log = logging.getLogger(__name__)
 
 DEFAULT_TZ = ZoneInfo("Europe/Lisbon")
 WATCHDOG_PING_S = 10
 HEALTH_CHECK_S = 10
+DEFAULT_HEARTBEAT_S = 60.0
 
 
 class Agent:
@@ -55,6 +58,7 @@ class Agent:
         now: Callable[[], datetime] = utc_now,
         build_date: date | None = None,
         actions: SystemActions | None = None,
+        heartbeat_interval_override: float | None = None,
     ) -> None:
         self.config = config
         self.client = client
@@ -76,6 +80,11 @@ class Agent:
         self.mpv_ready = asyncio.Event()
         self.health = MpvHealth()
         self.actions = actions or SystemActions()
+        # Tests only: the server's interval is always 30-60 s.
+        self.heartbeat_interval_override = heartbeat_interval_override
+        self.heartbeat_interval_s = DEFAULT_HEARTBEAT_S
+        self.heartbeat_backoff = Backoff(config.backoff_min_s, config.backoff_max_s)
+        self._rng = random.Random()  # noqa: S311 (jitter, not security)
 
     # ------------------------------------------------------------- manifest
 
@@ -292,6 +301,70 @@ class Agent:
             except Exception:
                 log.exception("Unexpected error while checking mpv health")
 
+    # ------------------------------------------------------------ heartbeat
+
+    def heartbeat_body(self) -> dict[str, Any]:
+        """Spec 5.1, with the v1.2 fields (playlist_hash_seen, cleared, clock_drift)."""
+        tz = self.manifest.tz if self.manifest else DEFAULT_TZ
+        return {
+            "agent_version": __version__,
+            "player_time": self.now().astimezone(tz).isoformat(timespec="seconds"),
+            "playlist_hash_applied": self.state.applied_hash,
+            "playlist_hash_seen": self.state.seen_hash,
+            "cleared": self.state.cleared,
+            "clock_drift": self.state.clock_drift,
+            "mpv": self.health.report(self._current_image_duration()).to_json(),
+            "sync": {"last_ok": self.state.last_sync_ok, "last_error": self.state.last_sync_error},
+            "update": {"state": "idle", "last_error": None},  # phase 3
+            "system": system_report(self.config.data_dir),
+            "acked_commands": [],
+        }
+
+    async def heartbeat_once(self) -> HeartbeatResponse | None:
+        """Send one heartbeat and act on the answer. Returns None on failure."""
+        try:
+            response = await asyncio.to_thread(self.client.post_heartbeat, self.heartbeat_body())
+        except Unauthorized as exc:
+            self._heartbeat_failed(f"{exc}; playing the local cache")
+            return None
+        except ServerError as exc:
+            self._heartbeat_failed(str(exc))
+            return None
+        self.heartbeat_backoff.reset()
+        self.heartbeat_interval_s = response.interval_s
+        self.state.last_heartbeat_ok = self.now().isoformat()
+        self.state.last_heartbeat_error = None
+        self.clock.observe_server_time(response.server_time, self.now())
+        await self.evaluate()  # applies or lifts clock_drift right away; saves state
+        await self.handle_commands(response)
+        self.changes.notify_hash(response.playlist_hash, self.state.seen_hash)
+        return response
+
+    def _heartbeat_failed(self, message: str) -> None:
+        log.error("Heartbeat failed: %s", message)
+        self.heartbeat_backoff.fail()
+        self.state.last_heartbeat_error = f"{self.now().isoformat()} {message}"
+        self._save()
+
+    async def handle_commands(self, response: HeartbeatResponse) -> None:
+        for command in response.commands:
+            log.warning("Ignoring command %s (%s): not supported yet", command.id, command.name)
+
+    def next_heartbeat_delay(self) -> float:
+        if self.heartbeat_backoff.failures:
+            return self.heartbeat_backoff.delay()
+        interval = self.heartbeat_interval_override or self.heartbeat_interval_s
+        return interval * self._rng.uniform(0.9, 1.1)
+
+    async def heartbeat_loop(self) -> None:
+        while True:
+            try:
+                await self.heartbeat_once()
+            except Exception:
+                log.exception("Unexpected heartbeat error")
+                self.heartbeat_backoff.fail()
+            await asyncio.sleep(self.next_heartbeat_delay())
+
     # ---------------------------------------------------------------- loops
 
     async def sync_loop(self) -> None:
@@ -329,4 +402,5 @@ class Agent:
             self.schedule_loop(),
             self.watchdog_loop(),
             self.health_loop(),
+            self.heartbeat_loop(),
         )

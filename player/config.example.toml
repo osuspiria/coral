@@ -5,8 +5,7 @@ data_dir = "/var/lib/signage"
 mpv_ipc = "unix:/run/signage/mpv.sock"
 # fallback_image defaults to assets/fallback.png inside the release.
 
-# Polling for the manifest (phase 1; the heartbeat replaces it in phase 2).
-poll_interval_s = 60
+# Syncing is driven by the heartbeat; its interval comes from the server.
 full_check_interval_s = 900
 backoff_min_s = 5
 backoff_max_s = 900

@@ -23,7 +23,7 @@ class Config:
     mpv_ipc: str = "unix:/run/signage/mpv.sock"
     fallback_image: Path = DEFAULT_FALLBACK
     fallback_duration_s: int = 30
-    poll_interval_s: float = 60
+    poll_interval_s: float = 60  # ignored since 0.2.0 (the heartbeat drives syncing)
     full_check_interval_s: float = 900
     reevaluate_interval_s: float = 300
     backoff_min_s: float = 5

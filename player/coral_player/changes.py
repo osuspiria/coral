@@ -1,16 +1,11 @@
-"""When to sync. Phase 1 polls the manifest; phase 2 swaps in the heartbeat.
+"""When to sync. Since phase 2 the heartbeat drives it (spec 5.1, 4.4).
 
 The agent only depends on the `ChangeSource` protocol:
 
 - `next_trigger()` waits until a sync should run and says whether it must be a
   full check (ignore the ETag and re-check every file);
 - `sync_finished(ok)` feeds the result back, so failures back off;
-- `wake()` asks for an immediate sync (used by `sync-now` in phase 2).
-
-`PollingChangeSource` asks for a sync on every poll; the conditional GET with
-`If-None-Match: <playlist_hash>` makes an unchanged manifest cost a 304. The
-phase 2 `HeartbeatChangeSource` will instead trigger only when the heartbeat's
-`playlist_hash` differs from the applied one.
+- `wake()` asks for an immediate sync (used by `sync-now`).
 """
 
 from __future__ import annotations
@@ -36,6 +31,8 @@ class ChangeSource(Protocol):
 
     def wake(self, full: bool = False) -> None: ...
 
+    def notify_hash(self, desired: str | None, seen: str | None) -> None: ...
+
 
 class Backoff:
     """Exponential backoff with jitter: a random delay in [d/2, d], d = min * 2^n."""
@@ -56,47 +53,63 @@ class Backoff:
         return self._rng.uniform(ceiling / 2, ceiling)
 
 
-class PollingChangeSource:
+class HeartbeatChangeSource:
+    """Syncs when the heartbeat reports a playlist hash the player has not handled
+    yet (`notify_hash`), on `sync-now` (`wake(full=True)`), at startup, and every
+    `full_interval_s` as a full check. Failures are retried with backoff, without
+    waiting for another heartbeat.
+
+    The heartbeat loop runs separately from syncing, so the player keeps reporting
+    while a long download is in progress.
+    """
+
     def __init__(
         self,
-        interval_s: float,
         full_interval_s: float,
         backoff: Backoff,
         *,
         monotonic: Callable[[], float] = time.monotonic,
-        rng: random.Random | None = None,
     ) -> None:
-        self.interval_s = interval_s
         self.full_interval_s = full_interval_s
         self.backoff = backoff
         self._monotonic = monotonic
-        self._rng = rng or random.Random()  # noqa: S311 (jitter, not security)
         self._wake = asyncio.Event()
         self._force_full = True  # the first sync after start is always a full check
         self._first = True
         self._last_full: float | None = None
         self._pending_full = False
+        self._requested_hash: str | None = None
 
     def wake(self, full: bool = False) -> None:
         self._force_full = self._force_full or full
         self._wake.set()
 
+    def notify_hash(self, desired: str | None, seen: str | None) -> None:
+        """Called on every heartbeat. Wakes the sync once per new desired hash; a
+        failed sync is retried by the backoff, not by every following heartbeat."""
+        if desired is None or desired == seen or desired == self._requested_hash:
+            return
+        self._requested_hash = desired
+        self.wake()
+
     def next_delay(self) -> float:
         if self.backoff.failures:
             return self.backoff.delay()
-        return self.interval_s * self._rng.uniform(0.9, 1.1)
+        if self._last_full is None:
+            return self.full_interval_s
+        elapsed = self._monotonic() - self._last_full
+        return max(0.0, self.full_interval_s - elapsed)
 
     async def next_trigger(self) -> SyncTrigger:
         if self._first:
             self._first = False
             reason = "startup"
         else:
-            delay = self.next_delay()
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=delay)
-                reason = "wake"
+                await asyncio.wait_for(self._wake.wait(), timeout=self.next_delay())
+                reason = "heartbeat"
             except TimeoutError:
-                reason = "backoff retry" if self.backoff.failures else "poll"
+                reason = "backoff retry" if self.backoff.failures else "periodic full check"
         self._wake.clear()
         due = self._last_full is None or (
             self._monotonic() - self._last_full >= self.full_interval_s
@@ -114,4 +127,4 @@ class PollingChangeSource:
         else:
             self.backoff.fail()
             if self._pending_full:
-                self._force_full = True  # retry the full check, not just a poll
+                self._force_full = True  # retry the full check, not just a fetch

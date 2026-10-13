@@ -46,6 +46,53 @@ class ManifestResponse:
     server_time: datetime | None
 
 
+@dataclass(frozen=True)
+class Command:
+    id: int
+    name: str
+
+
+@dataclass(frozen=True)
+class HeartbeatResponse:
+    server_time: datetime | None
+    playlist_hash: str | None
+    commands: tuple[Command, ...]
+    interval_s: float
+
+
+def parse_heartbeat_response(raw: Any) -> HeartbeatResponse:
+    """Validate the server's answer. Malformed commands are dropped here; the closed
+    list is enforced again when executing."""
+    if not isinstance(raw, dict):
+        raise ServerError("heartbeat response is not an object")
+    server_time = None
+    if isinstance(raw.get("server_time"), str):
+        try:
+            server_time = datetime.fromisoformat(raw["server_time"])
+            if server_time.tzinfo is None:
+                server_time = server_time.replace(tzinfo=UTC)
+        except ValueError:
+            server_time = None
+    playlist_hash = raw.get("playlist_hash")
+    if not isinstance(playlist_hash, str):
+        playlist_hash = None
+    commands = []
+    for item in raw.get("commands") or []:
+        if (
+            isinstance(item, dict)
+            and isinstance(item.get("id"), int)
+            and not isinstance(item.get("id"), bool)
+            and isinstance(item.get("name"), str)
+        ):
+            commands.append(Command(item["id"], item["name"][:64]))
+    interval = raw.get("heartbeat_interval_s")
+    if not isinstance(interval, int | float) or isinstance(interval, bool):
+        interval = 60
+    return HeartbeatResponse(
+        server_time, playlist_hash, tuple(commands), float(min(60, max(30, interval)))
+    )
+
+
 class ServerClient:
     def __init__(self, base_url: str, token: str, timeout_s: float) -> None:
         self.base_url = base_url.rstrip("/")
@@ -97,6 +144,22 @@ class ServerClient:
         except ValueError as exc:
             raise ServerError("manifest is not valid JSON") from exc
         return ManifestResponse(True, raw, etag or None, server_time)
+
+    def post_heartbeat(self, body: dict[str, Any]) -> HeartbeatResponse:
+        data = json.dumps(body).encode()
+        request = self._request(
+            "/api/v1/heartbeat", {"Content-Type": "application/json", "Accept": "application/json"}
+        )
+        request.data = data
+        request.method = "POST"
+        response = self._open(request)
+        with response:
+            payload = response.read(64 * 1024)
+        try:
+            raw = json.loads(payload)
+        except ValueError as exc:
+            raise ServerError("heartbeat response is not valid JSON") from exc
+        return parse_heartbeat_response(raw)
 
     def download(self, url_path: str, part: Path, expected_size: int) -> None:
         """Download into `part`, resuming with Range from its current size."""

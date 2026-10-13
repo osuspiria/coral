@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from coral_player.agent import Agent
-from coral_player.changes import Backoff, PollingChangeSource, SyncTrigger
+from coral_player.changes import Backoff, HeartbeatChangeSource, SyncTrigger
 from coral_player.client import ServerClient
 from coral_player.config import Config
 from coral_player.fsutil import read_json
@@ -67,7 +67,7 @@ class Harness:
         if self.agent is not None:
             await self.stop()
         client = ServerClient(self.server.url, token, 5)
-        changes = PollingChangeSource(60, 900, Backoff(5, 900))
+        changes = HeartbeatChangeSource(900, Backoff(5, 900))
         self.agent = Agent(
             self.config(),
             client,
@@ -535,5 +535,102 @@ def test_idle_mpv_gets_the_list_again(scenario):
         await agent.check_mpv_health()
         assert (await h.playlist()) == [h.file(1)]
         assert h.actions.calls == []
+
+    scenario(body)
+
+
+# --------------------------------------------------------------- heartbeat
+
+
+def test_heartbeat_reports_state(scenario):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        response = await agent.heartbeat_once()
+        assert response is not None
+        sent = h.server.heartbeats[-1]
+        assert sent["playlist_hash_applied"] == h.server.manifest["playlist_hash"]
+        assert sent["playlist_hash_seen"] == h.server.manifest["playlist_hash"]
+        assert (sent["cleared"], sent["clock_drift"]) == (False, False)
+        assert sent["mpv"]["state"] == "playing"
+        assert set(sent["system"]) == {"disk_free_mb", "temp_c", "uptime_s"}
+        assert sent["agent_version"]
+        assert agent.state.last_heartbeat_error is None
+
+    scenario(body)
+
+
+def test_heartbeat_with_new_hash_wakes_sync(scenario):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        await agent.heartbeat_once()
+        assert not agent.changes._wake.is_set()  # nothing new
+        h.publish(1, 2)
+        await agent.heartbeat_once()
+        assert agent.changes._wake.is_set()
+
+    scenario(body)
+
+
+def test_heartbeat_reports_cleared(scenario):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        h.server.manifest = make_manifest([], cleared=True)
+        await agent.sync_once(POLL)
+        await agent.heartbeat_once()
+        assert h.server.heartbeats[-1]["cleared"] is True
+
+    scenario(body)
+
+
+def test_heartbeat_401_keeps_playing_and_backs_off(scenario):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        agent = await h.reboot(token="revoked")
+        assert await agent.heartbeat_once() is None
+        assert "401" in agent.state.last_heartbeat_error
+        assert agent.heartbeat_backoff.failures == 1
+        assert (await h.playlist()) == [h.file(1)]
+
+    scenario(body)
+
+
+def test_heartbeat_network_failure_uses_backoff(scenario):
+    async def body(h):
+        agent = await h.start()
+        h.server.heartbeat_status = 503
+        for _ in range(3):
+            assert await agent.heartbeat_once() is None
+        assert agent.heartbeat_backoff.failures == 3
+        assert 10 <= agent.next_heartbeat_delay() <= 20  # 5 s doubled twice, jittered
+        h.server.heartbeat_status = 200
+        assert await agent.heartbeat_once() is not None
+        assert agent.heartbeat_backoff.failures == 0
+        assert 54 <= agent.next_heartbeat_delay() <= 66
+
+    scenario(body)
+
+
+def test_server_time_skew_sets_clock_drift(scenario):
+    async def body(h):
+        h.publish(1, (2, {"end": "2026-10-13"}))
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        h.server.server_time = NOON + timedelta(minutes=10)
+        await agent.heartbeat_once()
+        assert agent.state.clock_drift is True
+        await agent.heartbeat_once()
+        assert h.server.heartbeats[-1]["clock_drift"] is True
+        # The server agrees again (chrony fixed the clock): drift is lifted.
+        h.server.server_time = h.clock
+        await agent.heartbeat_once()
+        assert agent.state.clock_drift is False
 
     scenario(body)

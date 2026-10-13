@@ -38,6 +38,8 @@ class State:
     cleared: bool = False
     last_sync_ok: str | None = None
     last_sync_error: str | None = None
+    last_heartbeat_ok: str | None = None
+    last_heartbeat_error: str | None = None
     clock_drift: bool = False
     # sha256-named files no longer referenced, with the time they became unused.
     orphaned_since: dict[str, str] = field(default_factory=dict)
@@ -61,6 +63,8 @@ class State:
             "applied_hash",
             "last_sync_ok",
             "last_sync_error",
+            "last_heartbeat_ok",
+            "last_heartbeat_error",
         ):
             value = data.get(name)
             setattr(state, name, value if isinstance(value, str) else None)
