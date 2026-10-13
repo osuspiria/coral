@@ -464,6 +464,20 @@ Estes cenários devem ser testados antes de produção.
 
 Problemas encontrados no ecrã real e corrigidos durante a aceitação: o fallback aberto através do symlink `current` não era reconhecido (agente 0.1.1); um vídeo longo atrasava o "Clear screen", que passou a cortar o item atual (exceção à invariante 3, secções 3.3 e 4.5); e as imagens apareciam com um item de atraso no Pi 5, corrigido no `mpv.service` com o dispositivo `vc4` por caminho estável e `--swapchain-depth=1` (secção 4.5).
 
+**Fase 2 — aceite em 13/10/2026**, no mesmo Pi 5 (`p0`), com agente 0.2.0, polkit 126 e o dashboard em produção:
+
+| Verificação | Resultado |
+|---|---|
+| O dashboard mostra o estado real: online, versão, hash desejado/visto/aplicado, último sync e erro, disco, temperatura, uptime | OK |
+| Um manifest recusado (playlist vazia) aparece como "not applied" com a mensagem de erro | OK |
+| Regra polkit: o utilizador `signage` pode reiniciar o `mpv.service` e não pode pará-lo | OK |
+| `restart-player` executado e confirmado (acked) | OK |
+| Rede cortada 4 min: offline ~3 min depois do último heartbeat, online de novo ao voltar; o ecrã nunca parou | OK |
+| `sync-now` repara um ficheiro apagado da cache sem mudança de hash (um heartbeat normal não o faria); acked | OK (critério da fase) |
+| `reboot`: reinicia uma só vez e fica acked no primeiro heartbeat depois do arranque | OK |
+
+Nota: com a playlist vazia no servidor, o `sync-now` não repara a cache, porque o manifest vazio é recusado e nada é alterado (invariante 2).
+
 ---
 
 ## 11. Decisões e Pressupostos
