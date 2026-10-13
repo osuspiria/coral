@@ -36,7 +36,7 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM"]
 ignore = ["S101", "S603", "S607"]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S105", "S106", "S108", "S311"]
+"**/tests/**" = ["S105", "S106", "S107", "S108", "S311"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Form", "fastapi.Query", "fastapi.Header", "fastapi.File"]
