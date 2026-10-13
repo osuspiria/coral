@@ -40,6 +40,7 @@ from .sdnotify import notify
 from .state import PlayEntry, StateStore
 from .sync import MediaCache, SyncError
 from .system import SystemActions, system_report
+from .update import UpdateClient
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class Agent:
         self.heartbeat_backoff = Backoff(config.backoff_min_s, config.backoff_max_s)
         self._rng = random.Random()  # noqa: S311 (jitter, not security)
         self.commands = CommandExecutor(lambda: self.state, self._save, changes, self.actions)
+        self.update = UpdateClient(config.data_dir, __version__, config.updater_state_dir)
 
     # ------------------------------------------------------------- manifest
 
@@ -317,7 +319,7 @@ class Agent:
             "clock_drift": self.state.clock_drift,
             "mpv": self.health.report(self._current_image_duration()).to_json(),
             "sync": {"last_ok": self.state.last_sync_ok, "last_error": self.state.last_sync_error},
-            "update": {"state": "idle", "last_error": None},  # phase 3
+            "update": self.update.report(),
             "system": system_report(self.config.data_dir),
             "acked_commands": self.commands.acks_to_send(),
         }
@@ -342,7 +344,18 @@ class Agent:
         await self.evaluate()  # applies or lifts clock_drift right away; saves state
         await self.handle_commands(response)
         self.changes.notify_hash(response.playlist_hash, self.state.seen_hash)
+        self.handle_update(response)
         return response
+
+    def handle_update(self, response: HeartbeatResponse) -> None:
+        """Spec 6.2: ask the updater for the desired version; confirm a healthy start
+        of this release (a heartbeat was just accepted and mpv is playing)."""
+        try:
+            self.update.want(response.desired_version)
+            playing = self.health.report().state == "playing"
+            self.update.maybe_commit(heartbeat_accepted=True, playing=playing)
+        except OSError as exc:
+            log.error("Update bookkeeping failed: %s", exc)
 
     def _heartbeat_failed(self, message: str) -> None:
         log.error("Heartbeat failed: %s", message)

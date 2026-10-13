@@ -22,6 +22,7 @@ class Config:
     data_dir: Path = Path("/var/lib/signage")
     mpv_ipc: str = "unix:/run/signage/mpv.sock"
     fallback_image: Path = DEFAULT_FALLBACK
+    updater_state_dir: Path = Path("/var/lib/signage-updater")
     fallback_duration_s: int = 30
     poll_interval_s: float = 60  # ignored since 0.2.0 (the heartbeat drives syncing)
     full_check_interval_s: float = 900
@@ -61,7 +62,7 @@ class Config:
         return token
 
 
-_PATH_FIELDS = {"token_file", "data_dir", "fallback_image"}
+_PATH_FIELDS = {"token_file", "data_dir", "fallback_image", "updater_state_dir"}
 
 
 def validate_server_url(url: str) -> str:

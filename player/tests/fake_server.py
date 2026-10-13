@@ -18,6 +18,7 @@ class FakeServer:
         self.heartbeat_status = 200
         self.heartbeats: list[dict[str, Any]] = []  # bodies received
         self.commands: list[dict[str, Any]] = []  # sent until acked
+        self.desired_version: str | None = None
         self.files: dict[str, bytes] = {}
         self.corrupt: set[str] = set()  # serve wrong bytes for these sha256
         self.cut_after: dict[str, int] = {}  # close the connection after N bytes (once)
@@ -79,7 +80,7 @@ class FakeServer:
                 answer = {
                     "server_time": (now or datetime.now(UTC)).isoformat(),
                     "playlist_hash": (fake.manifest or {}).get("playlist_hash"),
-                    "desired_version": None,
+                    "desired_version": fake.desired_version,
                     "commands": list(fake.commands),
                     "heartbeat_interval_s": 60,
                 }

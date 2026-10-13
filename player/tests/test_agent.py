@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -61,6 +62,7 @@ class Harness:
             min_free_mb=0,
             http_timeout_s=5,
             fallback_image=self.tmp_path / "fallback.png",
+            updater_state_dir=self.tmp_path / "updater",
         )
 
     async def start(self, token: str = "tok") -> Agent:
@@ -691,5 +693,60 @@ def test_unknown_command_is_never_executed(scenario):
         await agent.heartbeat_once()
         assert h.actions.calls == []
         assert agent.state.pending_acks == [10]  # acked so the server stops sending it
+
+    scenario(body)
+
+
+# ------------------------------------------------------------------ updates
+
+
+def test_desired_version_becomes_an_update_request(scenario):
+    async def body(h):
+        agent = await h.start()
+        h.server.desired_version = "9.9.9"
+        await agent.heartbeat_once()
+        request = json.loads((h.tmp_path / "var/update/request.json").read_text())
+        assert request == {"version": "9.9.9"}
+        h.server.desired_version = None
+        await agent.heartbeat_once()
+        assert not (h.tmp_path / "var/update/request.json").exists()
+
+    scenario(body)
+
+
+def test_new_release_commits_after_healthy_heartbeat(scenario):
+    async def body(h):
+        from coral_player import __version__
+
+        h.publish(1)
+        updater = h.tmp_path / "updater"
+        updater.mkdir()
+        (updater / "status.json").write_text(
+            json.dumps({"state": "pending_commit", "version": __version__, "nonce": "abc"})
+        )
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        await agent.check_mpv_health()  # mpv is playing the list
+        await agent.heartbeat_once()
+        commit = json.loads((h.tmp_path / "var/update/commit.json").read_text())
+        assert commit == {"version": __version__, "nonce": "abc"}
+        assert h.server.heartbeats[-1]["update"]["state"] == "pending_commit"
+
+    scenario(body)
+
+
+def test_no_commit_while_mpv_is_not_playing(scenario):
+    async def body(h):
+        from coral_player import __version__
+
+        updater = h.tmp_path / "updater"
+        updater.mkdir()
+        (updater / "status.json").write_text(
+            json.dumps({"state": "pending_commit", "version": __version__, "nonce": "abc"})
+        )
+        agent = await h.start()
+        agent.health.on_disconnect()
+        await agent.heartbeat_once()
+        assert not (h.tmp_path / "var/update/commit.json").exists()
 
     scenario(body)

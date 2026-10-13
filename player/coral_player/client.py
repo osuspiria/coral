@@ -58,6 +58,7 @@ class HeartbeatResponse:
     playlist_hash: str | None
     commands: tuple[Command, ...]
     interval_s: float
+    desired_version: str | None = None
 
 
 def parse_heartbeat_response(raw: Any) -> HeartbeatResponse:
@@ -88,8 +89,15 @@ def parse_heartbeat_response(raw: Any) -> HeartbeatResponse:
     interval = raw.get("heartbeat_interval_s")
     if not isinstance(interval, int | float) or isinstance(interval, bool):
         interval = 60
+    desired_version = raw.get("desired_version")
+    if not isinstance(desired_version, str) or len(desired_version) > 32:
+        desired_version = None
     return HeartbeatResponse(
-        server_time, playlist_hash, tuple(commands), float(min(60, max(30, interval)))
+        server_time,
+        playlist_hash,
+        tuple(commands),
+        float(min(60, max(30, interval))),
+        desired_version,
     )
 
 
