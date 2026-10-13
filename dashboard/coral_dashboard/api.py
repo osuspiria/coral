@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from .deps import AppState, app_state, get_store, require_player
-from .repo import Store
+from .repo import VERSION_RE, Store
 
 router = APIRouter(prefix="/api/v1")
 
@@ -97,6 +97,7 @@ class SyncReport(_Lenient):
 
 class UpdateReport(_Lenient):
     state: str = Field("idle", max_length=32)
+    version: str | None = Field(None, max_length=32)
     last_error: str | None = Field(None, max_length=500)
 
 
@@ -139,14 +140,51 @@ def heartbeat(
     store.record_heartbeat(player["id"], body.model_dump(), now)
     if body.acked_commands:
         store.ack_commands(player["id"], body.acked_commands, now)
+    store.record_update_report(player["id"], body.update.model_dump())
+    player = store.get_player(player["id"])  # failed_version may have changed
     commands = store.deliver_commands(player["id"], now)
     return JSONResponse(
         {
             "server_time": now.isoformat(),
             "playlist_hash": store.player_etag(player),
-            "desired_version": None,  # phase 3
+            "desired_version": store.effective_desired_version(player),
             "commands": [{"id": c["id"], "name": c["name"]} for c in commands],
             "heartbeat_interval_s": state.settings.heartbeat_interval_s,
         },
         headers={"Cache-Control": "no-store"},
     )
+
+
+# ----------------------------------------------------------------- releases
+
+
+def release_path(settings_dir, version: str):
+    return settings_dir / f"coral-player-{version}.tar.gz"
+
+
+@router.get("/releases/{version}")
+def get_release(
+    version: str,
+    _player: sqlite3.Row = Depends(require_player),
+    store: Store = Depends(get_store),
+    state: AppState = Depends(app_state),
+) -> Response:
+    """Signed release tarball (spec 5.3). Supports Range for resumed downloads."""
+    if not VERSION_RE.fullmatch(version) or store.get_release(version) is None:
+        raise HTTPException(404, "Not found")
+    path = release_path(state.settings.releases_dir, version)
+    if not path.is_file():
+        raise HTTPException(404, "Not found")
+    return FileResponse(path, media_type="application/gzip")
+
+
+@router.get("/releases/{version}/signature")
+def get_release_signature(
+    version: str,
+    _player: sqlite3.Row = Depends(require_player),
+    store: Store = Depends(get_store),
+) -> Response:
+    release = store.get_release(version) if VERSION_RE.fullmatch(version) else None
+    if release is None:
+        raise HTTPException(404, "Not found")
+    return Response(release["signature"], media_type="text/plain; charset=utf-8")
