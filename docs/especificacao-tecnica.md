@@ -2,7 +2,15 @@
 
 ## Sistema de Digital Signage — Dashboard e Players Remotos
 
-**Versão 1.1 — Outubro 2026**
+**Versão 1.2 — Outubro 2026**
+
+---
+
+## Alterações face à versão 1.1
+
+| Área | Alteração |
+|---|---|
+| Limpeza do ecrã | Novo estado explícito por player (`cleared`), definido pela ação "Clear screen" no dashboard. O manifest passa a ter `assigned` e `cleared`. Um manifest com `items` vazio só é aceite quando traz `cleared: true`; uma lista vazia ou um player sem atribuição nunca limpam o ecrã por si (secções 3.3, 4.4, 5.3 e 9). |
 
 ---
 
@@ -111,7 +119,7 @@ Sistema de digital signage para reprodução remota de imagens e vídeos. É com
 | `media` | `id`, `sha256` (único), `stored_name`, `original_name`, `kind` (image/video), `size`, `duration_s`, `codec`, `width`, `height`, `created_at` |
 | `playlists` | `id`, `name`, `created_at` |
 | `playlist_items` | `id`, `playlist_id`, `media_id`, `position`, `start_date` (nulo = sem início), `end_date` (nulo = sem fim), `image_duration_s` (nulo = por omissão) |
-| `players` | `id`, `label`, `location`, `playlist_id`, `channel` (canary/stable), `desired_version`, `token_hash`, `revoked`, `last_seen`, `last_state` (JSON), `created_at` |
+| `players` | `id`, `label`, `location`, `playlist_id`, `cleared` (0/1), `channel` (canary/stable), `desired_version`, `token_hash`, `revoked`, `last_seen`, `last_state` (JSON), `created_at` |
 | `player_commands` | `id`, `player_id`, `name`, `created_at`, `acked_at` |
 | `alerts` | `id`, `player_id`, `kind`, `opened_at`, `resolved_at`, `notified_at` |
 
@@ -130,6 +138,7 @@ Notas: a ordem usa `position` (não `order`, que é palavra reservada em SQL). A
 - CRUD de playlists. Itens com ordem (drag-and-drop ou campo numérico), `start_date`, `end_date` e duração de imagem.
 - Semântica das datas: **inclusivas**, em **hora local do fuso configurado** (por omissão `Europe/Lisbon`); nulo significa sem limite.
 - Cada playlist tem um `playlist_hash` (sha256 do manifest ordenado), recalculado em cada alteração.
+- Gravar uma playlist **vazia** que esteja atribuída a players **não limpa os ecrãs** (o player recusa manifests vazios sem `cleared`). O dashboard avisa: *"This won't clear the screens. Use Clear screen if that's what you want."*
 
 **Players**
 - Lista de players: `id – label – estado – playlist atual – versão – último contacto`, p. ex.:
@@ -139,6 +148,9 @@ Notas: a ordem usa `position` (não `order`, que é palavra reservada em SQL). A
   ```
 - Estado **online/offline calculado pelo servidor**: offline se `now - last_seen > 3 × intervalo` (por omissão 3 min). Mostra também: hash aplicado vs. desejado, último sync (OK/erro), espaço livre, temperatura, uptime, estado de update.
 - Atribuir playlist, canal (canary/stable), versão desejada, e enviar comandos da lista fechada (secção 5.2).
+- **Limpar o ecrã (ação explícita):** "Clear screen" por player, com confirmação, grava `players.cleared = 1`; o manifest desse player passa a ser `"cleared": true` com `"items": []` e o player mostra o fallback. "Resume" ou atribuir uma playlist repõe `cleared = 0`. A limpeza nunca é deduzida de uma lista vazia.
+- **Retirar a playlist** a um player pergunta *"Clear the screen too?"*: se sim, é uma limpeza explícita (como acima); se não, o player mantém a última lista que tem.
+- A partir da fase 2, o estado `cleared` é reportado no heartbeat e mostrado no dashboard em vez de uma lista desatualizada.
 
 **Releases**
 - Página/CLI para carregar releases assinadas (secção 6) e definir a versão desejada por canal ou por player.
@@ -207,10 +219,15 @@ Três serviços em vez de quatro: heartbeat, sync e playlist vivem no mesmo agen
 ### 4.4 Sincronização de Media
 
 1. O heartbeat devolve `playlist_hash`. Se difere do aplicado, o agente faz `GET /api/v1/manifest`. Há também verificação completa periódica (ex.: cada 15 min).
-2. O manifest lista os itens: `sha256`, `size`, `url`, `kind`, `position`, `start_date`, `end_date`, `duration`.
+2. O manifest indica `assigned` (o player tem playlist atribuída) e `cleared` (limpeza explícita), o fuso e a duração de imagem por omissão, e lista os itens: `sha256`, `size`, `url`, `kind`, `position`, `start_date`, `end_date`, `duration`. Regras de aceitação:
+   - `cleared: true` (com `items: []`) é aceite: o player descarta a lista aplicada e mostra o fallback; a cache local mantém-se pelo período de graça normal, para um restauro rápido.
+   - `items` vazio **sem** `cleared: true` é recusado (ver ponto 5).
+   - `assigned: false` (ex.: player acabado de provisionar) não é uma limpeza: o player mantém o que tem (no primeiro arranque, o fallback).
+   - Um 404, 5xx ou erro de rede **nunca** significa limpeza: o player mantém o que tem.
+   - Uma playlist com itens mas nenhum válido hoje (filtro de datas) é um manifest válido: o player mostra o fallback (secção 4.5).
 3. Para cada ficheiro em falta: download para `media/.staging/<sha256>.part` com `Range` (retoma), timeout e backoff; verificação de **sha256 e tamanho**; só então `rename` para `media/<sha256>.<ext>`.
 4. O manifest só é promovido a `manifest.json` (e aplicado) **quando todos os ficheiros estão presentes e verificados**. Nunca há playlist a apontar para ficheiros em falta.
-5. **Limpeza:** ficheiros que já não constam do manifest são removidos com período de graça. Um **manifest vazio é recusado** (tratado como erro e alertado) e há limite de remoção por operação.
+5. **Limpeza:** ficheiros que já não constam do manifest são removidos com período de graça. Um **manifest vazio sem `cleared: true` é recusado** (tratado como erro e alertado; nunca apaga nada) e há limite de remoção por operação.
 6. Verificação de espaço livre antes de descarregar. Se faltar espaço, reporta erro e mantém a playlist anterior.
 
 ### 4.5 Motor de Playlist e Reprodução
@@ -280,7 +297,7 @@ O pedido tem timeout curto. Em falha, o player faz **backoff exponencial com jit
 
 | Método e caminho | Função |
 |---|---|
-| `GET /api/v1/manifest` | Manifest da playlist atribuída a este player |
+| `GET /api/v1/manifest` | Manifest da playlist atribuída a este player. Sempre 200 para um token válido, com `assigned` e `cleared` (secção 4.4). `ETag` = `playlist_hash`; com `If-None-Match` igual responde 304 |
 | `GET /api/v1/media/<sha256>` | Download de ficheiro (suporta `Range`) |
 | `GET /api/v1/releases/<versão>` | Tarball da release e respetiva assinatura |
 
@@ -365,7 +382,10 @@ Estes cenários devem ser testados antes de produção.
 | Rede em baixo | Continua a tocar a cache; backoff no heartbeat; ao voltar, sincroniza |
 | VPS em baixo | Igual ao anterior; alerta externo avisa que o dashboard caiu |
 | Ficheiro corrompido/incompleto | Falha a verificação sha256; não é promovido; playlist anterior mantém-se; erro reportado |
-| Manifest vazio ou inválido | Recusado; nada é apagado; alerta |
+| Manifest vazio (sem `cleared`) ou inválido | Recusado; nada é apagado; alerta |
+| Limpeza explícita (`cleared: true`) | Aceite; mostra o fallback; cache mantida pelo período de graça |
+| Player sem playlist atribuída (`assigned: false`) | Mantém o que tem; no primeiro arranque mostra o fallback |
+| Manifest responde 404 ou 5xx | Nunca limpa; mantém a lista atual; erro reportado |
 | Playlist sem itens válidos hoje | Mostra o fallback; não fica ecrã preto |
 | Item expira à meia-noite | Reavaliação periódica remove-o sem novo sync |
 | Relógio errado no arranque | Mantém última lista; reporta `clock_drift`; corrige quando chrony sincronizar |

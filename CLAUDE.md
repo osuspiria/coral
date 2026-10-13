@@ -8,7 +8,7 @@ Hardware e SO do Pi já estão prontos (Pi 5 4GB, arranque pelo SSD NVMe, Raspbe
 
 ## Documento de referência
 
-A especificação completa está em `docs/especificacao-tecnica.md` (v1.1). É a fonte de verdade para modelo de dados, API, fluxos de sync/update, cenários de falha e faseamento. **Lê a secção relevante antes de implementar** (não a carregues toda de cada vez). Se o código e a spec divergirem, pára e pergunta; não decidas sozinho. Este ficheiro resume só o que tens de ter sempre presente.
+A especificação completa está em `docs/especificacao-tecnica.md` (v1.2). É a fonte de verdade para modelo de dados, API, fluxos de sync/update, cenários de falha e faseamento. **Lê a secção relevante antes de implementar** (não a carregues toda de cada vez). Se o código e a spec divergirem, pára e pergunta; não decidas sozinho. Este ficheiro resume só o que tens de ter sempre presente.
 
 ## Arquitetura (decisões fixas)
 
@@ -31,7 +31,7 @@ A especificação completa está em `docs/especificacao-tecnica.md` (v1.1). É a
 ## Invariantes (nunca quebrar)
 
 1. O player **nunca** fica com ecrã preto: playlist vazia ou sem itens válidos → imagem de fallback incluída na release.
-2. Uma playlist nova **só é aplicada com todos os ficheiros presentes e verificados** (sha256 + tamanho). Manifest vazio ou inválido é recusado e nunca apaga nada.
+2. Uma playlist nova **só é aplicada com todos os ficheiros presentes e verificados** (sha256 + tamanho). An empty manifest without an explicit cleared flag is refused and never deletes anything; an invalid manifest is also refused.
 3. Aplicar uma playlist nova **não pode interromper o item em reprodução** (testar o comportamento do mpv; `loadlist` em modo substituição reinicia o item).
 4. Falhas (rede, VPS, ficheiro corrompido, update mau) deixam o ecrã a tocar conteúdo válido e são **reportadas**, nunca silenciadas.
 5. **Comandos remotos só de uma lista fechada** (`sync-now`, `restart-player`, `reboot`). Nunca shell nem texto arbitrário.
