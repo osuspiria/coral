@@ -89,7 +89,11 @@ sudo cat /var/lib/signage/state.json      # playing, last_sync_ok, last_sync_err
 ls -la /var/lib/signage/media
 ```
 
-**Se o mpv não mostrar imagem** (erro de DRM no journal): editar `/etc/systemd/system/mpv.service`, trocar `--vo=gpu --gpu-context=drm` por `--vo=drm`, e correr `sudo systemctl daemon-reload && sudo systemctl restart mpv`. Anotar qual das duas funcionou (decisão da spec §4.5 por validar). No primeiro Pi 5 instalado foi o `--vo=drm` que mostrou imagem.
+**Saída de vídeo no Pi 5** (validado no primeiro Pi, mpv 0.40.0): o `mpv.service` usa `--vo=gpu --gpu-context=drm --drm-device=/dev/dri/by-path/platform-axi:gpu-card --swapchain-depth=1`.
+
+- O ecrã está no dispositivo `vc4` (`platform-axi:gpu-card`). O `card0` costuma ser o `v3d`, sem saídas, e a numeração `cardN` pode mudar entre arranques. Confirmar com `ls -l /dev/dri/by-path/` e `cat /sys/class/drm/card*-HDMI-A-*/status`.
+- Sem `--swapchain-depth=1` cada imagem só aparece quando chega o frame seguinte, ou seja, com um item de atraso (a IMAGEM 2 de uma lista "pisca" e a IMAGEM 1 fica no ecrã o tempo das duas). O `--vo=drm` tem o mesmo problema.
+- Os avisos `VT_GETMODE failed` ao correr o mpv por SSH são inofensivos.
 
 ## 7. Validar o comportamento do mpv no Pi (invariante 3)
 
@@ -103,7 +107,18 @@ sudo -u signage env PYTHONPATH=/opt/signage/current/player \
 sudo systemctl start mpv signage-agent
 ```
 
-O resultado esperado é cinco linhas `OK` e `All checks passed.` Guardar a saída (inclui a versão do mpv). No primeiro Pi (mpv 0.40.0, `--vo=drm`) passaram as cinco.
+O resultado esperado é cinco linhas `OK` e `All checks passed.` Guardar a saída (inclui a versão do mpv). No primeiro Pi (mpv 0.40.0) passaram as cinco.
+
+Este teste verifica o estado do mpv, não o que aparece no ecrã. Para confirmar que as imagens aparecem a tempo, gerar duas imagens e mostrá-las com durações diferentes (vermelho 2 s, verde 6 s); se o vermelho ficar 6 s e o verde 2 s, há um item de atraso (falta `--swapchain-depth=1`):
+
+```bash
+sudo systemctl stop signage-agent mpv
+cd /tmp
+ffmpeg -v error -y -f lavfi -i color=c=red:s=1920x1080 -frames:v 1 r.png
+ffmpeg -v error -y -f lavfi -i color=c=green:s=1920x1080 -frames:v 1 g.png
+sudo -u signage timeout 20 mpv --vo=gpu --gpu-context=drm     --drm-device=/dev/dri/by-path/platform-axi:gpu-card --swapchain-depth=1     --loop-playlist=inf --really-quiet     --{ --image-display-duration=2 /tmp/r.png --} --{ --image-display-duration=6 /tmp/g.png --}
+sudo systemctl start mpv signage-agent
+```
 
 ## 8. Notas e limitações da fase 1
 

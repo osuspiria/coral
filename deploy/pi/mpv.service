@@ -10,10 +10,15 @@ Conflicts=getty@tty1.service
 User=signage
 Group=signage
 SupplementaryGroups=video render audio
-# To validate on the Pi 5: if --gpu-context=drm fails, try --vo=drm (spec 4.5).
-# --hwdec=auto-safe uses the HEVC hardware decoder; H.264 is decoded in software.
+# Validated on the Pi 5 (mpv 0.40.0):
+# - --drm-device: the display is the vc4 device; card0/card1 numbering is not stable
+#   (card0 is usually v3d, which has no outputs), so use the by-path name.
+# - --swapchain-depth=1: without it a still image is only shown when the next frame
+#   arrives, i.e. each image appears one item late. --vo=drm has the same problem.
+# - --hwdec=auto-safe uses the HEVC hardware decoder; H.264 is decoded in software.
 ExecStart=/usr/bin/mpv \
-    --vo=gpu --gpu-context=drm --hwdec=auto-safe \
+    --vo=gpu --gpu-context=drm --drm-device=/dev/dri/by-path/platform-axi:gpu-card \
+    --swapchain-depth=1 --hwdec=auto-safe \
     --fullscreen --idle=yes --force-window=yes --loop-playlist=inf \
     --image-display-duration=30 \
     --no-terminal --no-osc --osd-level=0 --no-input-default-bindings --input-vo-keyboard=no \
