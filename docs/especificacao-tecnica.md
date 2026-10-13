@@ -329,7 +329,7 @@ O player só pede o manifest quando o `playlist_hash` da resposta difere do últ
 
 - **Pull:** o player decide atualizar quando o heartbeat indica `desired_version` diferente da atual.
 - **Releases imutáveis e versionadas** em `/opt/signage/releases/<versão>/`, com dependências empacotadas (sem `pip` online). Configuração e dados ficam fora da release.
-- **Assinatura obrigatória** (minisign ou GPG): a chave privada fica **fora do VPS** (na máquina de desenvolvimento). O player só instala releases verificadas com a chave pública que tem. Assim, um VPS comprometido não consegue distribuir código para os players.
+- **Assinatura obrigatória** (minisign, decidido na fase 3): a chave privada fica **fora do VPS** (na máquina de desenvolvimento). O player só instala releases verificadas com a chave pública que tem. Assim, um VPS comprometido não consegue distribuir código para os players.
 - **Updater mínimo e estável**, separado do agente: não é atualizado pelo mesmo mecanismo (atualização rara e deliberada).
 
 ### 6.2 Fluxo
@@ -346,6 +346,15 @@ O player só pede o manifest quando o `playlist_hash` da resposta difere do últ
 
 - **canary / stable** por player: o player de teste atualiza primeiro; a promoção é feita no dashboard ao definir a versão desejada para o canal stable.
 - São mantidas as últimas 3 releases no player.
+
+### 6.5 Detalhes de implementação (fase 3)
+
+- **Assinatura:** `minisign`. O *trusted comment* (também assinado) é `coral-player <versão>`; o updater recusa a release se a versão não coincidir com a pedida, o que impede servir uma release antiga com outro nome. A chave pública está em `/etc/signage/release-pubkey.pub`.
+- **Separação de privilégios:** o agente corre sem root e só **pede** o update (`/var/lib/signage/update/request.json`) e o **confirma** (`commit.json`). O updater corre como root (timer de 1 min), só lê esses ficheiros (sem seguir symlinks, tamanho limitado, versão validada) e guarda o seu estado em `/var/lib/signage-updater/` (`pending.json`, `status.json`, `failed.json`), que o agente lê para o reportar.
+- **Endpoints:** `GET /api/v1/releases/<versão>` (tarball, suporta `Range`) e `GET /api/v1/releases/<versão>/signature`.
+- **Versão desejada efetiva** de um player: a sua própria (`players.desired_version`), se definida; senão a do canal. Se for igual a `players.failed_version`, o servidor devolve `null` (não volta a tentar até a versão desejada mudar).
+- **Relatório no heartbeat:** `update: {"state": ..., "version": ..., "last_error": ...}` com `state` em `idle`, `downloading`, `installing`, `pending_commit`, `committed`, `rolled_back`, `rejected` (assinatura ou selftest) ou `failed`. Com `rolled_back` ou `rejected`, o servidor grava `failed_version`.
+- **O updater não altera units systemd nem a regra polkit**; essas mudanças continuam manuais.
 
 ### 6.4 Acesso de Emergência
 
@@ -413,7 +422,8 @@ Estes cenários devem ser testados antes de produção.
 | Vídeo incompatível carregado | Rejeitado no upload com mensagem clara |
 | mpv bloqueado | Detetado por `time-pos` parado; agente reinicia o mpv; reporta |
 | Comando pendente para player offline | Expira ao fim de 15 min sem entrega; nunca é executado mais tarde |
-| Release com assinatura inválida | Rejeitada; nada instalado; reportado |
+| Release com assinatura inválida | Rejeitada; nada instalado; reportado (`rejected`) |
+| Release que falha o selftest | Não instalada; `current` intacto; reportado (`rejected`) |
 | Release que não arranca | Rollback automático em ≈3 min; `update_failed`; versão marcada má |
 | Token revogado | Heartbeat 401; player continua a tocar cache; deixa de sincronizar |
 | Pi bloqueado por completo | Watchdog de hardware reinicia |
