@@ -426,6 +426,23 @@ Estes cenários devem ser testados antes de produção.
 | 3 | Updater assinado, selftest, rollback, canais | Update bom aplica; update mau reverte sozinho |
 | 4 | Alertas, backups, hardening, provisionamento, acesso de emergência | Cenários da secção 9 passam; restauro de backup testado |
 
+#### Registo de aceitação
+
+**Fase 1 — aceite em 13/10/2026**, no primeiro Pi 5 (player `p0`, Pombal), com mpv 0.40.0, agente 0.1.1 e o dashboard em produção (`coral.lesto.cc`). O teste foi feito no ecrã real com media de teste (imagens com legenda e um vídeo de 40 s com relógio):
+
+| Verificação | Resultado |
+|---|---|
+| A playlist atribuída é descarregada, verificada e toca em loop | OK |
+| Alterar a playlist durante um vídeo: o vídeo vai até ao fim e só depois entra a lista nova (critério da fase) | OK |
+| Item com `end_date` passado sai da rotação | OK |
+| "Clear screen" corta logo para o fallback; "Resume" repõe o conteúdo a partir da cache, sem downloads | OK |
+| Playlist esvaziada: o dashboard avisa, o player recusa o manifest vazio, continua a tocar e reporta o erro com backoff | OK |
+| Corte de energia com o manifest vazio no servidor: o player retoma sozinho a última lista | OK |
+| Validação do mpv real (`player/tests/test_mpv_real.py`) no Pi | 5/5 OK |
+| Item com `end_date` = dia do teste sai à meia-noite local sem pedido ao servidor | Por confirmar no journal de 14/10/2026 (coberto por testes automáticos) |
+
+Problemas encontrados no ecrã real e corrigidos durante a aceitação: o fallback aberto através do symlink `current` não era reconhecido (agente 0.1.1); um vídeo longo atrasava o "Clear screen", que passou a cortar o item atual (exceção à invariante 3, secções 3.3 e 4.5); e as imagens apareciam com um item de atraso no Pi 5, corrigido no `mpv.service` com o dispositivo `vc4` por caminho estável e `--swapchain-depth=1` (secção 4.5).
+
 ---
 
 ## 11. Decisões e Pressupostos
