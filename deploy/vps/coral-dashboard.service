@@ -1,0 +1,23 @@
+# /etc/systemd/system/coral-dashboard.service — FastAPI dashboard, one uvicorn worker.
+[Unit]
+Description=CORAL signage dashboard
+After=network.target
+
+[Service]
+User=coral
+Group=coral
+WorkingDirectory=/opt/coral
+EnvironmentFile=/etc/coral/dashboard.env
+Environment=PYTHONPATH=/opt/coral/dashboard:/opt/coral/tools
+ExecStart=/opt/coral/.venv/bin/uvicorn coral_dashboard.main:create_app --factory \
+    --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=3
+ProtectSystem=strict
+ReadWritePaths=/var/lib/coral
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

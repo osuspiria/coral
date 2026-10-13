@@ -1,0 +1,11 @@
+# /etc/caddy/Caddyfile — HTTPS with automatic TLS in front of the dashboard.
+# Replace the hostname. HTTP is redirected to HTTPS automatically.
+signage.example.com {
+	request_body {
+		max_size 2GB
+	}
+	reverse_proxy 127.0.0.1:8000 {
+		# Uploads are streamed; do not buffer them in Caddy.
+		flush_interval -1
+	}
+}

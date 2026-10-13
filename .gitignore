@@ -9,3 +9,4 @@ token
 /data/
 *.sqlite3
 *.db
+player/config.dev.toml

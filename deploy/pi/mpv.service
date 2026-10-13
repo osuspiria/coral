@@ -1,0 +1,26 @@
+# /etc/systemd/system/mpv.service — continuous playback on the HDMI screen (DRM/KMS, no X11).
+# Starts with the fallback image so the screen is never black, even before the agent runs.
+[Unit]
+Description=CORAL signage playback (mpv)
+After=systemd-tmpfiles-setup.service
+# Free tty1 so mpv can take the DRM output.
+Conflicts=getty@tty1.service
+
+[Service]
+User=signage
+Group=signage
+SupplementaryGroups=video render audio
+# To validate on the Pi 5: if --gpu-context=drm fails, try --vo=drm (spec 4.5).
+# --hwdec=auto-safe uses the HEVC hardware decoder; H.264 is decoded in software.
+ExecStart=/usr/bin/mpv \
+    --vo=gpu --gpu-context=drm --hwdec=auto-safe \
+    --fullscreen --idle=yes --force-window=yes --loop-playlist=inf \
+    --image-display-duration=30 \
+    --no-terminal --no-osc --osd-level=0 --no-input-default-bindings --input-vo-keyboard=no \
+    --input-ipc-server=/run/signage/mpv.sock \
+    /opt/signage/current/player/assets/fallback.png
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+# /etc/systemd/system/signage-agent.service — sync, playlist engine and mpv control.
+# Deliberately not ordered after network-online: the last list must come back on
+# boot even without network (the agent retries the server with backoff).
+[Unit]
+Description=CORAL signage agent
+After=mpv.service
+Wants=mpv.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=signage
+Group=signage
+Environment=PYTHONPATH=/opt/signage/current/player
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m coral_player --config /etc/signage/config.toml
+Restart=always
+RestartSec=5
+WatchdogSec=60
+# The agent only writes to /var/lib/signage (created here with the right owner).
+StateDirectory=signage
+StateDirectoryMode=0750
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=-/run/signage
+
+[Install]
+WantedBy=multi-user.target

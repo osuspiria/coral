@@ -71,4 +71,24 @@ A especificação completa está em `docs/especificacao-tecnica.md` (v1.2). É a
 
 ## Comandos úteis
 
-_(Preencher à medida que o projeto é criado: arrancar o dashboard em dev, correr testes, construir e assinar uma release, instalar no Pi.)_
+```bash
+uv sync                                   # ambiente de desenvolvimento (.venv)
+uv run pytest                             # todos os testes (mpv/ffprobe reais: skip se ausentes)
+uv run ruff check . && uv run ruff format --check .
+
+# Dashboard em dev (http://127.0.0.1:8000), com .env na raiz (ver .env.example, CORAL_COOKIE_SECURE=false)
+PYTHONPATH=dashboard uv run uvicorn coral_dashboard.main:create_app --factory --workers 1
+
+# Provisionar / revogar players, hash da password de admin
+PYTHONPATH=dashboard:tools uv run python -m signagectl player add --label pombal
+PYTHONPATH=dashboard:tools uv run python -m signagectl player revoke <id>
+PYTHONPATH=dashboard:tools uv run python -m signagectl admin hash-password
+
+# Agente em dev (precisa de um mpv com IPC)
+PYTHONPATH=player uv run python -m coral_player --config player/config.dev.toml
+
+# Validar o mpv real (Linux/Pi, precisa de mpv + ffmpeg)
+PYTHONPATH=player python3 player/tests/test_mpv_real.py --vo=null
+```
+
+Instalação: `docs/instalacao-vps.md` e `docs/instalacao-pi.md`. Releases assinadas: fase 3.
