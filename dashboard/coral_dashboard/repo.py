@@ -7,6 +7,7 @@ Every mutation that can change what a player sees refreshes the stored
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,9 @@ from .manifest import ManifestContext, build_manifest
 COMMANDS = ("sync-now", "restart-player", "reboot")
 COMMAND_TTL = timedelta(minutes=15)
 OFFLINE_FACTOR = 3  # offline after 3 missed heartbeats (spec 3.3)
+CHANNELS = ("canary", "stable")
+VERSION_RE = re.compile(r"\d+\.\d+\.\d+")
+FAILED_UPDATE_STATES = ("rolled_back", "rejected")
 
 
 class NotFound(Exception):
@@ -443,6 +447,84 @@ class Store:
             in_sync=bool(state) and state.get("playlist_hash_seen") == desired,
         )
 
+    # ------------------------------------------------------------- releases
+
+    def add_release(self, version: str, sha256: str, size: int, signature: str) -> int:
+        _check_version(version)
+        if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+            raise ValueError("Invalid sha256")
+        try:
+            cur = self.conn.execute(
+                "INSERT INTO releases (version, sha256, size, signature, created_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (version, sha256, size, signature, now_iso()),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise Conflict(f"Release {version} already exists") from exc
+        return int(cur.lastrowid)
+
+    def get_release(self, version: str) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM releases WHERE version = ?", (version,)).fetchone()
+
+    def list_releases(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM releases ORDER BY id DESC").fetchall()
+
+    def list_channels(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM channels ORDER BY name").fetchall()
+
+    def set_channel_version(self, channel: str, version: str | None) -> None:
+        if channel not in CHANNELS:
+            raise ValueError(f"Unknown channel {channel!r}")
+        if version is not None and self.get_release(version) is None:
+            raise NotFound(f"Release {version} not found")
+        self.conn.execute(
+            "UPDATE channels SET desired_version = ? WHERE name = ?", (version, channel)
+        )
+
+    def set_player_channel(self, player_id: int, channel: str) -> None:
+        if channel not in CHANNELS:
+            raise ValueError(f"Unknown channel {channel!r}")
+        self.get_player(player_id)
+        self.conn.execute("UPDATE players SET channel = ? WHERE id = ?", (channel, player_id))
+
+    def set_player_version(self, player_id: int, version: str | None) -> None:
+        """Per-player override of the channel's desired version (None = follow channel)."""
+        self.get_player(player_id)
+        if version is not None and self.get_release(version) is None:
+            raise NotFound(f"Release {version} not found")
+        self.conn.execute(
+            "UPDATE players SET desired_version = ? WHERE id = ?", (version, player_id)
+        )
+
+    def clear_failed_version(self, player_id: int) -> None:
+        self.get_player(player_id)
+        self.conn.execute("UPDATE players SET failed_version = NULL WHERE id = ?", (player_id,))
+
+    def target_version(self, player: sqlite3.Row) -> str | None:
+        """The player's own version if set, else its channel's."""
+        if player["desired_version"]:
+            return player["desired_version"]
+        row = self.conn.execute(
+            "SELECT desired_version FROM channels WHERE name = ?", (player["channel"],)
+        ).fetchone()
+        return row["desired_version"] if row else None
+
+    def effective_desired_version(self, player: sqlite3.Row) -> str | None:
+        """What the heartbeat sends: None when the target already failed on this player
+        (spec 6.2.7: no update/rollback loop until the desired version changes)."""
+        target = self.target_version(player)
+        if target is None or target == player["failed_version"]:
+            return None
+        return target
+
+    def record_update_report(self, player_id: int, update: dict[str, Any]) -> None:
+        if update.get("state") in FAILED_UPDATE_STATES and update.get("version"):
+            version = str(update["version"])
+            if VERSION_RE.fullmatch(version):
+                self.conn.execute(
+                    "UPDATE players SET failed_version = ? WHERE id = ?", (version, player_id)
+                )
+
 
 def _clean_name(name: str) -> str:
     name = name.strip()
@@ -472,3 +554,8 @@ def _check_duration(image_duration_s: int | None) -> None:
 
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).replace(microsecond=0).isoformat()
+
+
+def _check_version(version: str) -> None:
+    if not VERSION_RE.fullmatch(version):
+        raise ValueError(f"Invalid version {version!r}, expected MAJOR.MINOR.PATCH")

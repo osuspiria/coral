@@ -40,6 +40,7 @@ SECURITY_HEADERS = {
 def init_storage(settings: Settings, ctx: ManifestContext) -> None:
     settings.media_dir.mkdir(parents=True, exist_ok=True)
     settings.incoming_dir.mkdir(parents=True, exist_ok=True)
+    settings.releases_dir.mkdir(parents=True, exist_ok=True)
     conn = connect(settings.db_path)
     try:
         migrate(conn)

@@ -9,8 +9,8 @@ from dash_helpers import CTX, add_media
 
 def test_migrate_is_idempotent(tmp_path):
     conn = connect(tmp_path / "db.sqlite3")
-    assert migrate(conn) == 2
-    assert migrate(conn) == 2
+    assert migrate(conn) == 3
+    assert migrate(conn) == 3
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 

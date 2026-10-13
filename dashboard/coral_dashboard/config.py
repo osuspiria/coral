@@ -62,6 +62,10 @@ class Settings:
         return self.data_dir / "media"
 
     @property
+    def releases_dir(self) -> Path:
+        return self.data_dir / "releases"
+
+    @property
     def incoming_dir(self) -> Path:
         return self.data_dir / "media" / ".incoming"
 
