@@ -110,6 +110,7 @@ Editar `/etc/coral/dashboard.env`:
   (copiar a linha impressa, já com plicas).
 - `CORAL_COOKIE_SECURE=true` (obrigatório em produção).
 - Perfil de vídeo (`CORAL_VIDEO_*`): valores iniciais da spec §4.5, a afinar depois dos testes no ecrã.
+- `CORAL_HEARTBEAT_INTERVAL_S` (opcional, 30–60, por omissão 60): intervalo de heartbeat enviado aos players; um player fica offline ao fim de 3 intervalos sem contacto.
 
 ## 4. Serviço e Caddy
 
