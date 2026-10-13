@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from fastapi import Depends, HTTPException, Request
 
@@ -27,6 +28,7 @@ class AppState:
     ctx: ManifestContext
     sessions: SessionSigner
     login_sessions: SessionSigner
+    clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
 
 
 def app_state(request: Request) -> AppState:

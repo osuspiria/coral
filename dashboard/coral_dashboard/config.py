@@ -49,6 +49,7 @@ class Settings:
     max_upload_mb: int = 2048
     media_grace_days: int = 7
     session_hours: int = 12
+    heartbeat_interval_s: int = 60
     ffprobe_path: str = "ffprobe"
     profile: VideoProfile = field(default_factory=VideoProfile)
 
@@ -101,6 +102,8 @@ def settings_from_env(env: dict[str, str] | None = None) -> Settings:
         max_upload_mb=int(env.get("CORAL_MAX_UPLOAD_MB", "2048")),
         media_grace_days=int(env.get("CORAL_MEDIA_GRACE_DAYS", "7")),
         ffprobe_path=env.get("CORAL_FFPROBE", "ffprobe"),
+        # Spec 5.1: heartbeat every 30-60 s.
+        heartbeat_interval_s=min(60, max(30, int(env.get("CORAL_HEARTBEAT_INTERVAL_S", "60")))),
         profile=profile,
     )
     settings.validate()
