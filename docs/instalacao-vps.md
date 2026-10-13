@@ -2,6 +2,69 @@
 
 Guia para pôr o dashboard a correr num VPS Debian/Ubuntu com Caddy à frente (HTTPS automático). Tudo o que está entre `<...>` tem de ser substituído.
 
+Os comandos usam `sudo` e assumem um utilizador de administração (não-root), criado no passo 0. O código em `/opt/coral` pertence ao root de propósito: o serviço corre como `coral` e só tem acesso de leitura ao código e de escrita a `/var/lib/coral`.
+
+## 0. Utilizador de administração e acesso SSH
+
+Num VPS acabado de criar só existe o `root`. Como `root`, cria o teu utilizador (`<admin>`, ex.: `oleg`):
+
+```bash
+adduser <admin>                       # pede uma password (fica para o sudo)
+usermod -aG sudo <admin>
+# Copiar a chave SSH com que entras como root para o novo utilizador
+install -d -m 700 -o <admin> -g <admin> /home/<admin>/.ssh
+install -m 600 -o <admin> -g <admin> /root/.ssh/authorized_keys /home/<admin>/.ssh/authorized_keys
+```
+
+**Noutro terminal, sem fechar a sessão de root**, confirmar que funciona:
+
+```bash
+ssh <admin>@<ip-do-vps>
+sudo -v                               # tem de aceitar a password
+```
+
+Só depois de isso funcionar, desligar o login de root e por password:
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/10-coral.conf > /dev/null <<'CONF'
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+CONF
+sudo sshd -t && sudo systemctl reload ssh
+```
+
+Firewall (só SSH, HTTP e HTTPS):
+
+```bash
+sudo apt install -y ufw
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+sudo ufw status
+```
+
+A partir daqui, tudo é feito como `<admin>` com `sudo`.
+
+### Se já fizeste os passos seguintes como root
+
+Não há nada a desfazer: os passos 1 e 2 correm de qualquer forma com privilégios de root. Faz só estas verificações:
+
+```bash
+which uv                              # tem de ser /usr/local/bin/uv
+# Se estiver em /root/.local/bin (instalador corrido sem UV_INSTALL_DIR):
+#   sudo install -m 755 /root/.local/bin/uv /root/.local/bin/uvx /usr/local/bin/
+
+ls -l /opt/coral/.venv/bin/python     # o destino NÃO pode estar dentro de /root
+# Se apontar para /root/... o utilizador coral não o consegue executar. Refazer:
+#   cd /opt/coral && sudo rm -rf .venv
+#   sudo env UV_PYTHON_INSTALL_DIR=/opt/uv-python uv sync --no-dev --frozen
+
+sudo -u coral /opt/coral/.venv/bin/python -c "import fastapi; print('ok')"
+ls -ld /var/lib/coral                 # dono tem de ser coral:coral
+```
+
 ## 1. Pré-requisitos
 
 - Um VPS com Debian 12 / Ubuntu 22.04+ e um nome DNS (ex.: `signage.<dominio>`) a apontar para o IP público do VPS.
@@ -21,7 +84,10 @@ sudo useradd --system --home /var/lib/coral --shell /usr/sbin/nologin coral
 sudo mkdir -p /opt/coral /var/lib/coral /etc/coral
 sudo git clone <url-do-repositorio> /opt/coral
 cd /opt/coral
-sudo uv sync --no-dev --frozen          # cria /opt/coral/.venv com Python ≥ 3.11
+# Se o SO não tiver Python ≥ 3.11 (ex.: Ubuntu 22.04), o uv descarrega um; fica em
+# /opt/uv-python (e não em /root) para o utilizador coral o poder executar.
+sudo env UV_PYTHON_INSTALL_DIR=/opt/uv-python uv sync --no-dev --frozen
+sudo -u coral /opt/coral/.venv/bin/python -c "import fastapi; print('ok')"
 sudo chown -R coral:coral /var/lib/coral
 ```
 
@@ -73,7 +139,7 @@ O token aparece **uma única vez**: guardar já, vai para `/etc/signage/token` n
 ## 6. Atualizar o dashboard
 
 ```bash
-cd /opt/coral && sudo git pull && sudo uv sync --no-dev --frozen
+cd /opt/coral && sudo git pull && sudo env UV_PYTHON_INSTALL_DIR=/opt/uv-python uv sync --no-dev --frozen
 sudo systemctl restart coral-dashboard   # as migrações correm no arranque
 ```
 
