@@ -267,7 +267,10 @@ Pedido:
   "agent_version": "1.4.2",
   "player_time": "2026-10-13T13:40:00+01:00",
   "playlist_hash_applied": "ab12...",
-  "mpv": { "state": "playing", "current_file": "9f3c....mp4", "progressing": true },
+  "playlist_hash_seen": "ab12...",
+  "cleared": false,
+  "clock_drift": false,
+  "mpv": { "state": "playing", "current_file": "9f3c....mp4", "progressing": true, "restarts": 0 },
   "sync": { "last_ok": "2026-10-13T13:35:10+01:00", "last_error": null },
   "update": { "state": "idle", "last_error": null },
   "system": { "disk_free_mb": 182000, "temp_c": 51.2, "uptime_s": 86400 },
@@ -289,9 +292,26 @@ Resposta:
 
 O pedido tem timeout curto. Em falha, o player faz **backoff exponencial com jitter** e continua a reproduzir a cache local.
 
+Campos acrescentados na v1.2 (fase 2):
+- `playlist_hash_applied`: hash do último manifest promovido (o que está em `manifest.json`).
+- `playlist_hash_seen`: hash do último manifest tratado com sucesso (aplicado, limpeza ou sem atribuição). Difere do desejado quando o player recusa um manifest (ex.: vazio sem `cleared`), o que o dashboard mostra como "não aplicado".
+- `cleared`: o player está em limpeza explícita (mostra o fallback por decisão do admin, secção 3.3).
+- `clock_drift`: o relógio do player é inválido (secção 4.5); a lista aplicada está congelada.
+- `mpv.state`: `playing`, `idle`, `stuck` (sem progresso, reiniciado pelo agente) ou `disconnected` (sem ligação IPC); `mpv.restarts`: reinícios do mpv feitos pelo agente desde o arranque.
+- `desired_version` é `null` e `update.state` é `idle` até à fase 3.
+
+O player só pede o manifest quando o `playlist_hash` da resposta difere do último tratado, ou na verificação completa periódica (secção 4.4).
+
 ### 5.2 Comandos (lista fechada)
 
 `sync-now`, `restart-player`, `reboot`. Nunca texto arbitrário nem shell remoto. Cada comando tem `id` e só é considerado concluído quando o player o confirma em `acked_commands`.
+
+- `sync-now`: verificação completa imediata do manifest e dos ficheiros.
+- `restart-player`: reinicia o `mpv.service`; o agente reaplica a lista ao reconectar.
+- `reboot`: reinicia o sistema.
+- **Expiração:** um comando que não foi entregue a um heartbeat nos 15 min seguintes à criação passa a `expired` e nunca chega ao player (evita, p. ex., um reboot dias depois de o player voltar a estar online).
+- **Sem repetição:** o player grava o `id` antes de executar e confirma-o no heartbeat seguinte; um `id` já executado nunca volta a ser executado (um `reboot` não entra em ciclo).
+- O agente corre sem root: `restart-player` e `reboot` passam por uma regra polkit limitada ao utilizador `signage`.
 
 ### 5.3 Restantes Endpoints (player)
 
@@ -392,6 +412,7 @@ Estes cenários devem ser testados antes de produção.
 | Disco quase cheio | Sync recusa descarregar; mantém lista anterior; alerta |
 | Vídeo incompatível carregado | Rejeitado no upload com mensagem clara |
 | mpv bloqueado | Detetado por `time-pos` parado; agente reinicia o mpv; reporta |
+| Comando pendente para player offline | Expira ao fim de 15 min sem entrega; nunca é executado mais tarde |
 | Release com assinatura inválida | Rejeitada; nada instalado; reportado |
 | Release que não arranca | Rollback automático em ≈3 min; `update_failed`; versão marcada má |
 | Token revogado | Heartbeat 401; player continua a tocar cache; deixa de sincronizar |
