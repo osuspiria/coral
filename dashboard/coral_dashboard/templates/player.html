@@ -79,6 +79,45 @@
 </div>
 
 <div class="card">
+  <h2>Software update</h2>
+  <table>
+    <tr><th>Running</th><td>{{ st.agent_version if st else "—" }}</td></tr>
+    <tr><th>Target</th><td>{{ target_version or "— (no update)" }}
+      <span class="muted">({% if p.desired_version %}player override{% else %}channel {{ p.channel }}{% endif %})</span>
+      {% if target_version and desired_version != target_version %}<span class="badge bad">not offered: failed on this player</span>{% endif %}
+    </td></tr>
+    {% if st %}<tr><th>Update state</th><td>{{ st.update.state }}{% if st.update.version %} {{ st.update.version }}{% endif %}
+      {% if st.update.last_error %}<span class="badge bad">error</span> {{ st.update.last_error }}{% endif %}</td></tr>{% endif %}
+    {% if p.failed_version %}<tr><th>Failed version</th><td><span class="badge bad">{{ p.failed_version }}</span>
+      <form method="post" action="/players/{{ p.id }}/clear-failed" class="inline"
+            data-confirm="Allow {{ p.failed_version }} to be tried again on {{ p.label }}?">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="secondary">Try again</button>
+      </form></td></tr>{% endif %}
+  </table>
+  <div class="row" style="margin-top:.8rem">
+    <form method="post" action="/players/{{ p.id }}/channel" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Channel
+        <select name="channel">{% for c in channel_names %}<option value="{{ c }}" {% if c == p.channel %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+      </label>
+      <button type="submit" class="secondary">Set channel</button>
+    </form>
+    <form method="post" action="/players/{{ p.id }}/version" class="row"
+          data-confirm="Change the software version of {{ p.label }}? It updates at its next heartbeat.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Own version
+        <select name="version">
+          <option value="">— follow channel —</option>
+          {% for r in releases %}<option value="{{ r.version }}" {% if r.version == p.desired_version %}selected{% endif %}>{{ r.version }}</option>{% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="secondary">Set version</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
   <h2>Commands</h2>
   <p class="muted">Delivered at the next heartbeat. A command not delivered within 15 minutes expires.</p>
   <div class="row">

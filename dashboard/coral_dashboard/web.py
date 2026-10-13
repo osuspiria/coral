@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from . import media
 from .auth import LOGIN_COOKIE, SESSION_COOKIE, Session, verify_password
 from .deps import AppState, app_state, get_store, require_admin
-from .repo import COMMANDS, Conflict, Store
+from .repo import CHANNELS, COMMANDS, Conflict, NotFound, Store
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -149,6 +149,10 @@ def player_page(
         commands=store.list_commands(player_id),
         command_names=COMMANDS,
         playlists=store.list_playlists(),
+        releases=store.list_releases(),
+        channel_names=CHANNELS,
+        target_version=store.target_version(player),
+        desired_version=store.effective_desired_version(player),
     )
 
 
@@ -444,3 +448,78 @@ def resume_screen(
 ) -> Response:
     store.set_cleared(player_id, False)
     return redirect(f"/players/{player_id}", notice="Screen resumed.")
+
+
+# --------------------------------------------------------------- releases
+
+
+@router.get("/releases", response_class=HTMLResponse)
+def releases_page(
+    request: Request,
+    session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> HTMLResponse:
+    counts: dict[str, int] = {}
+    for player in store.list_players():
+        if not player["revoked"]:
+            counts[player["channel"]] = counts.get(player["channel"], 0) + 1
+    return render(
+        request,
+        "releases.html",
+        session,
+        releases=store.list_releases(),
+        channels=store.list_channels(),
+        channel_counts=counts,
+    )
+
+
+@router.post("/releases/channels/{channel}")
+def set_channel_version(
+    channel: str,
+    version: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        store.set_channel_version(channel, _opt_str(version))
+    except (ValueError, NotFound) as exc:
+        return redirect("/releases", error=str(exc))
+    return redirect("/releases", notice=f"Channel {channel} set to {version or 'none'}.")
+
+
+@router.post("/players/{player_id}/channel")
+def set_player_channel(
+    player_id: int,
+    channel: str = Form(...),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        store.set_player_channel(player_id, channel)
+    except ValueError as exc:
+        return redirect(f"/players/{player_id}", error=str(exc))
+    return redirect(f"/players/{player_id}", notice=f"Channel set to {channel}.")
+
+
+@router.post("/players/{player_id}/version")
+def set_player_version(
+    player_id: int,
+    version: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        store.set_player_version(player_id, _opt_str(version))
+    except NotFound as exc:
+        return redirect(f"/players/{player_id}", error=str(exc))
+    return redirect(f"/players/{player_id}", notice="Software version updated.")
+
+
+@router.post("/players/{player_id}/clear-failed")
+def clear_failed_version(
+    player_id: int,
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    store.clear_failed_version(player_id)
+    return redirect(f"/players/{player_id}", notice="The failed version may be tried again.")

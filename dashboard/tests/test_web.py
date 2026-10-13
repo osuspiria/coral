@@ -175,3 +175,33 @@ def test_commands_require_csrf(client, app_store):
     pid = app_store.create_player("pombal", hash_token("tok"))
     assert client.post(f"/players/{pid}/commands", data={"name": "reboot"}).status_code == 403
     assert app_store.list_commands(pid) == []
+
+
+def test_releases_page_and_player_update_controls(client, admin, app_store):
+    app_store.add_release("0.3.0", "a" * 64, 2048, "sig")
+    app_store.add_release("0.3.1", "a" * 64, 2048, "sig")
+    pid = app_store.create_player("pombal", hash_token("tok"))
+    page = client.get("/releases").text
+    assert "0.3.0" in page and "canary" in page and "stable" in page
+
+    assert "Channel stable set to 0.3.0" in admin("/releases/channels/stable", version="0.3.0").text
+    assert app_store.effective_desired_version(app_store.get_player(pid)) == "0.3.0"
+    assert "Unknown channel" in admin("/releases/channels/beta", version="0.3.0").text
+
+    admin(f"/players/{pid}/channel", channel="canary")
+    admin("/releases/channels/canary", version="0.3.1")
+    assert app_store.effective_desired_version(app_store.get_player(pid)) == "0.3.1"
+
+    admin(f"/players/{pid}/version", version="0.3.0")
+    assert app_store.get_player(pid)["desired_version"] == "0.3.0"
+    detail = client.get(f"/players/{pid}").text
+    assert "player override" in detail
+
+    app_store.record_update_report(pid, {"state": "rolled_back", "version": "0.3.0"})
+    detail = client.get(f"/players/{pid}").text
+    assert "not offered: failed on this player" in detail and "Try again" in detail
+    admin(f"/players/{pid}/clear-failed")
+    assert app_store.get_player(pid)["failed_version"] is None
+
+    admin(f"/players/{pid}/version", version="")
+    assert app_store.get_player(pid)["desired_version"] is None

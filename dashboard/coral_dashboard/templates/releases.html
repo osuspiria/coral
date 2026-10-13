@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Releases{% endblock %}
+{% block content %}
+<h1>Player releases</h1>
+<p class="muted">Releases are built and signed on the development machine and added with
+  <code>signagectl release add</code>. Players verify the signature before installing.</p>
+
+<div class="card">
+  <h2>Channels</h2>
+  <p class="muted">Players follow their channel's version unless they have their own. Test on canary first, then set the same version on stable.</p>
+  <table>
+    <thead><tr><th>Channel</th><th>Desired version</th><th>Players</th></tr></thead>
+    <tbody>
+    {% for ch in channels %}
+      <tr>
+        <td>{{ ch.name }}</td>
+        <td>
+          <form method="post" action="/releases/channels/{{ ch.name }}" class="row"
+                data-confirm="Set the {{ ch.name }} channel? Its players update at their next heartbeat.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <select name="version">
+              <option value="">— none (no updates) —</option>
+              {% for r in releases %}<option value="{{ r.version }}" {% if r.version == ch.desired_version %}selected{% endif %}>{{ r.version }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="secondary">Set</button>
+          </form>
+        </td>
+        <td>{{ channel_counts.get(ch.name, 0) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<table>
+  <thead><tr><th>Version</th><th>Size</th><th>sha256</th><th>Added</th></tr></thead>
+  <tbody>
+  {% for r in releases %}
+    <tr>
+      <td>{{ r.version }}</td>
+      <td>{{ (r.size / 1024) | round(1) }} KB</td>
+      <td class="mono">{{ r.sha256[:16] }}…</td>
+      <td class="mono">{{ r.created_at }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">No releases yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
