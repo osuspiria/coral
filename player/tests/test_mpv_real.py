@@ -217,4 +217,5 @@ if __name__ == "__main__":
             print("FAIL", exc)
             sys.exit(1)
     print("All checks passed.")
+    sys.stdout.flush()  # os._exit skips buffer flushing when piped
     os._exit(0)
