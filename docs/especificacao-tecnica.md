@@ -460,7 +460,7 @@ Estes cenários devem ser testados antes de produção.
 | Playlist esvaziada: o dashboard avisa, o player recusa o manifest vazio, continua a tocar e reporta o erro com backoff | OK |
 | Corte de energia com o manifest vazio no servidor: o player retoma sozinho a última lista | OK |
 | Validação do mpv real (`player/tests/test_mpv_real.py`) no Pi | 5/5 OK |
-| Item com `end_date` = dia do teste sai à meia-noite local sem pedido ao servidor | Por confirmar no journal de 14/10/2026 (coberto por testes automáticos) |
+| Item com `end_date` = dia do teste sai à meia-noite local sem pedido ao servidor | OK (journal: `Play list changed: 2 entries` às 00:00:01 de 14/10/2026, agente 0.2.0) |
 
 Problemas encontrados no ecrã real e corrigidos durante a aceitação: o fallback aberto através do symlink `current` não era reconhecido (agente 0.1.1); um vídeo longo atrasava o "Clear screen", que passou a cortar o item atual (exceção à invariante 3, secções 3.3 e 4.5); e as imagens apareciam com um item de atraso no Pi 5, corrigido no `mpv.service` com o dispositivo `vc4` por caminho estável e `--swapchain-depth=1` (secção 4.5).
 
