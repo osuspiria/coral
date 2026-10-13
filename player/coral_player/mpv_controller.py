@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,13 @@ class MpvController:
     def _image_opts(duration: float | None) -> dict[str, str]:
         return {"image-display-duration": f"{duration:g}"} if duration else {}
 
+    def _is_fallback(self, filename: str | None) -> bool:
+        """mpv reports the path as it was given (e.g. through the `current` symlink in
+        mpv.service), so compare real paths."""
+        if not filename:
+            return False
+        return os.path.realpath(filename) == os.path.realpath(self.fallback)
+
     async def _loadfile(self, path: str, flags: str, opts: dict[str, str]) -> None:
         kwargs: dict[str, Any] = {"url": path, "flags": flags}
         if opts:
@@ -82,7 +90,7 @@ class MpvController:
                 for path, opts in targets:
                     await self._loadfile(path, "append", opts)
                 self._stale_ids.add(int(current["id"]))
-                if current.get("filename") == str(self.fallback) and entries:
+                if self._is_fallback(current.get("filename")) and entries:
                     # Nothing worth finishing on screen: leave the fallback right away.
                     await self.ipc.command("playlist-next", "force")
                     log.info("Replaced the fallback with a list of %d entries", len(targets))

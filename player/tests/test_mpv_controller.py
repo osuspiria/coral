@@ -185,3 +185,20 @@ def test_disconnect_raises_and_status():
             await ctl.apply([entry(2)])
 
     run(scenario())
+
+
+def test_fallback_given_through_another_path_is_recognised():
+    """mpv.service opens the fallback via the `current` symlink; the agent knows the
+    resolved path. Both must be recognised as the same file."""
+
+    async def scenario():
+        other_spelling = str(FALLBACK.parent / ".." / "assets" / FALLBACK.name)
+        mpv, ipc, ctl = await setup([other_spelling])
+        await ctl.apply([entry(1)])
+        await settle()
+        assert mpv.current_entry.filename == path(1)
+        assert mpv.filenames() == [path(1)]
+        await ipc.close()
+        await mpv.stop()
+
+    run(scenario())
