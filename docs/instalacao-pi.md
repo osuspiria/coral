@@ -19,7 +19,7 @@ Se o Python for < 3.11, **parar** e reportar: o agente usa `tomllib` (3.11+).
 ```bash
 sudo apt update
 sudo apt install -y mpv
-mpv --version | head -1              # anotar a versão (comportamento do IPC validado em ≥ 0.34)
+mpv --version | head -1              # anotar a versão (IPC validado no 0.34.1 e no 0.40.0 do Pi 5)
 sudo apt install -y ffmpeg           # só para o teste de validação do passo 7 (pode remover-se depois)
 ```
 
@@ -89,7 +89,7 @@ sudo cat /var/lib/signage/state.json      # playing, last_sync_ok, last_sync_err
 ls -la /var/lib/signage/media
 ```
 
-**Se o mpv não mostrar imagem** (erro de DRM no journal): editar `/etc/systemd/system/mpv.service`, trocar `--vo=gpu --gpu-context=drm` por `--vo=drm`, e correr `sudo systemctl daemon-reload && sudo systemctl restart mpv`. Anotar qual das duas funcionou (decisão da spec §4.5 por validar).
+**Se o mpv não mostrar imagem** (erro de DRM no journal): editar `/etc/systemd/system/mpv.service`, trocar `--vo=gpu --gpu-context=drm` por `--vo=drm`, e correr `sudo systemctl daemon-reload && sudo systemctl restart mpv`. Anotar qual das duas funcionou (decisão da spec §4.5 por validar). No primeiro Pi 5 instalado foi o `--vo=drm` que mostrou imagem.
 
 ## 7. Validar o comportamento do mpv no Pi (invariante 3)
 
@@ -98,12 +98,12 @@ Este teste usa o mpv real do Pi, no ecrã, e confirma que uma lista nova não re
 ```bash
 sudo systemctl stop signage-agent mpv
 sudo -u signage env PYTHONPATH=/opt/signage/current/player \
-    python3 /opt/signage/current/player/tests/test_mpv_real.py --vo=gpu
+    python3 /opt/signage/current/player/tests/test_mpv_real.py --vo=drm
 # se o passo 6 precisou de --vo=drm, usar --vo=drm aqui
 sudo systemctl start mpv signage-agent
 ```
 
-O resultado esperado é cinco linhas `OK` e `All checks passed.` Guardar a saída (inclui a versão do mpv).
+O resultado esperado é cinco linhas `OK` e `All checks passed.` Guardar a saída (inclui a versão do mpv). No primeiro Pi (mpv 0.40.0, `--vo=drm`) passaram as cinco.
 
 ## 8. Notas e limitações da fase 1
 

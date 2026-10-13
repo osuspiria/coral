@@ -433,7 +433,7 @@ Estes cenários devem ser testados antes de produção.
 - **MQTT removido deste sistema.** O Mosquitto, se montado no VPS para outro projeto, fica independente do signage (sem ponto de falha partilhado).
 - **Transferência de media por HTTPS** (manifest + sha256) em vez de rsync/SSH, para ter um só protocolo e autenticação e promoção atómica da playlist. Se se preferir manter rsync, a alternativa é aceitável mas obriga a staging e validação do manifest pelo agente.
 - **Decodificação de vídeo:** perfil de compatibilidade a confirmar com testes no Pi 5 e no ecrã real.
-- **Comportamento do mpv ao aplicar listas** (sem cortar o item atual) a validar na fase 1.
+- **Comportamento do mpv ao aplicar listas** (sem cortar o item atual): **validado na fase 1** (13/10/2026) com `playlist-clear` + `loadfile … append` (argumentos nomeados) e remoção da entrada antiga no `start-file` seguinte, no mpv 0.34.1 (WSL, `--vo=null`) e no mpv 0.40.0 do Pi 5 (`--vo=drm`). O teste é `player/tests/test_mpv_real.py`.
 - **Fuso horário:** `Europe/Lisbon` por omissão, configurável.
 - Existe experiência prévia com Raspberry Pi, Python e systemd.
 - Prioridade explícita: simplicidade e robustez acima de funcionalidades adicionais.
