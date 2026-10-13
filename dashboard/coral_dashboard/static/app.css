@@ -30,5 +30,6 @@ form.inline { display: inline; }
 .mono { font-family: ui-monospace, monospace; font-size: .85rem; }
 .badge { display: inline-block; padding: 0 .45rem; border-radius: 999px; font-size: .8rem; background: var(--line); }
 .badge.bad { background: #fdecea; color: var(--bad); }
+.badge.ok { background: #e8f3ec; color: var(--ok); }
 .badge.warn { background: #fff4e5; color: var(--warn); }
 progress { width: 100%; }

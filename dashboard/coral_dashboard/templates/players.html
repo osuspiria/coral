@@ -2,57 +2,44 @@
 {% block title %}Players{% endblock %}
 {% block content %}
 <h1>Players</h1>
-<p class="muted">Status and last contact arrive with the heartbeat (phase 2).</p>
+<p class="muted">Status comes from the heartbeat; a player is offline after 3 missed heartbeats. Reload to refresh.</p>
 <table>
-  <thead><tr><th>ID</th><th>Label</th><th>Location</th><th>Playlist</th><th>Screen</th><th>Actions</th></tr></thead>
+  <thead><tr><th>ID</th><th>Label</th><th>Status</th><th>Playlist</th><th>Screen</th><th>Version</th><th>Disk / temp / uptime</th></tr></thead>
   <tbody>
-  {% for p in players %}
+  {% for p, s in rows %}
+    {% set st = s.state %}
     <tr>
       <td>{{ p.id }}</td>
-      <td>{{ p.label }}{% if p.revoked %} <span class="badge bad">revoked</span>{% endif %}</td>
-      <td>{{ p.location }}</td>
+      <td><a href="/players/{{ p.id }}">{{ p.label }}</a>{% if p.location %} <span class="muted">· {{ p.location }}</span>{% endif %}</td>
       <td>
-        {% if p.revoked %}{{ p.playlist_name or "—" }}{% else %}
-        <form method="post" action="/players/{{ p.id }}/assign" class="row">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <select name="playlist_id" required>
-            <option value="">— choose —</option>
-            {% for pl in playlists %}<option value="{{ pl.id }}" {% if pl.id == p.playlist_id %}selected{% endif %}>{{ pl.name }}</option>{% endfor %}
-          </select>
-          <button type="submit" class="secondary">Assign</button>
-        </form>
+        {% if p.revoked %}<span class="badge bad">revoked</span>
+        {% elif s.online %}<span class="badge ok">online</span>
+        {% else %}<span class="badge bad">offline</span>{% endif %}
+        <span class="muted">{{ s.seen_ago_s | human_seconds }}{% if s.seen_ago_s is not none %} ago{% endif %}</span>
+      </td>
+      <td>{{ p.playlist_name or "—" }}</td>
+      <td>
+        {% if not st %}<span class="muted">no report yet</span>
+        {% else %}
+          {% if st.cleared %}<span class="badge warn">cleared</span>
+          {% elif st.mpv.state == "playing" %}playing
+          {% else %}<span class="badge bad">mpv {{ st.mpv.state }}</span>{% endif %}
+          {% if not s.in_sync %}<span class="badge warn" title="The player has not applied the current playlist">not applied</span>{% endif %}
+          {% if st.clock_drift %}<span class="badge bad">clock drift</span>{% endif %}
+          {% if st.sync.last_error %}<span class="badge bad" title="{{ st.sync.last_error }}">sync error</span>{% endif %}
         {% endif %}
       </td>
-      <td>{% if p.cleared %}<span class="badge warn">cleared</span>{% elif p.playlist_id %}playing list{% else %}<span class="muted">unassigned</span>{% endif %}</td>
+      <td>{{ st.agent_version if st else "—" }}</td>
       <td>
-        {% if not p.revoked %}
-        <div class="row">
-          {% if p.playlist_id %}
-          <form method="post" action="/players/{{ p.id }}/unassign" class="row">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <span class="muted">Unassign — clear the screen too?</span>
-            <button type="submit" name="clear" value="yes" class="danger">Yes, clear</button>
-            <button type="submit" name="clear" value="no" class="secondary">No, keep last list</button>
-          </form>
-          {% endif %}
-          {% if p.cleared %}
-          <form method="post" action="/players/{{ p.id }}/resume" class="inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="secondary">Resume</button>
-          </form>
-          {% else %}
-          <form method="post" action="/players/{{ p.id }}/clear" class="inline"
-                data-confirm="Clear the screen of {{ p.label }}? It cuts what is playing and shows the fallback image until you resume or assign a playlist.">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="danger">Clear screen</button>
-          </form>
-          {% endif %}
-        </div>
-        {% endif %}
+        {% if st %}
+          {{ (st.system.disk_free_mb / 1024) | round(1) if st.system.disk_free_mb is not none else "?" }} GB ·
+          {{ st.system.temp_c | round(1) if st.system.temp_c is not none else "?" }} °C ·
+          {{ st.system.uptime_s | human_seconds if st.system.uptime_s is not none else "?" }}
+        {% else %}—{% endif %}
       </td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="muted">No players yet. Create one with <code>signagectl player add</code>.</td></tr>
+    <tr><td colspan="7" class="muted">No players yet. Create one with <code>signagectl player add</code>.</td></tr>
   {% endfor %}
   </tbody>
 </table>

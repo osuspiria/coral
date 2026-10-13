@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}{{ p.label }}{% endblock %}
+{% block content %}
+{% set st = s.state %}
+<h1>Player {{ p.id }}: {{ p.label }}{% if p.location %} <span class="muted">· {{ p.location }}</span>{% endif %}</h1>
+
+<div class="card">
+  <h2>Status</h2>
+  {% if p.revoked %}<p class="msg error">This player is revoked; its token no longer works.</p>{% endif %}
+  <table>
+    <tr><th>Connection</th><td>
+      {% if s.online %}<span class="badge ok">online</span>{% else %}<span class="badge bad">offline</span>{% endif %}
+      last heartbeat {{ s.seen_ago_s | human_seconds }}{% if s.seen_ago_s is not none %} ago{% endif %}
+      {% if p.last_seen %}<span class="muted mono">({{ p.last_seen }})</span>{% endif %}
+    </td></tr>
+    {% if st %}
+    <tr><th>Agent version</th><td>{{ st.agent_version }}</td></tr>
+    <tr><th>Playback</th><td>
+      mpv {{ st.mpv.state }}{% if st.mpv.progressing %} (progressing){% endif %}
+      {% if st.mpv.current_file %}<span class="mono">{{ st.mpv.current_file[:16] }}…</span>{% endif %}
+      {% if st.mpv.restarts %}<span class="badge warn">{{ st.mpv.restarts }} mpv restart(s)</span>{% endif %}
+      {% if st.cleared %}<span class="badge warn">cleared</span>{% endif %}
+    </td></tr>
+    <tr><th>Playlist hash</th><td class="mono">
+      desired {{ (s.desired_hash or "—")[:12] }} · seen {{ (st.playlist_hash_seen or "—")[:12] }} · applied {{ (st.playlist_hash_applied or "—")[:12] }}
+      {% if s.in_sync %}<span class="badge ok">in sync</span>{% else %}<span class="badge warn">not applied</span>{% endif %}
+    </td></tr>
+    <tr><th>Last sync</th><td>
+      {% if st.sync.last_error %}<span class="badge bad">error</span> {{ st.sync.last_error }}{% else %}OK{% endif %}
+      {% if st.sync.last_ok %}<span class="muted">· last OK {{ st.sync.last_ok }}</span>{% endif %}
+    </td></tr>
+    <tr><th>Clock</th><td>{% if st.clock_drift %}<span class="badge bad">clock drift</span> the player keeps its last list until the clock is fixed{% else %}OK{% endif %}
+      <span class="muted">· player time {{ st.player_time }}</span></td></tr>
+    <tr><th>System</th><td>
+      disk free {{ (st.system.disk_free_mb / 1024) | round(1) if st.system.disk_free_mb is not none else "?" }} GB ·
+      temperature {{ st.system.temp_c | round(1) if st.system.temp_c is not none else "?" }} °C ·
+      uptime {{ st.system.uptime_s | human_seconds if st.system.uptime_s is not none else "?" }}
+    </td></tr>
+    {% else %}
+    <tr><th>Report</th><td class="muted">No heartbeat received yet.</td></tr>
+    {% endif %}
+  </table>
+</div>
+
+{% if not p.revoked %}
+<div class="card">
+  <h2>Playlist</h2>
+  <form method="post" action="/players/{{ p.id }}/assign" class="row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <select name="playlist_id" required>
+      <option value="">— choose —</option>
+      {% for pl in playlists %}<option value="{{ pl.id }}" {% if pl.id == p.playlist_id %}selected{% endif %}>{{ pl.name }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="secondary">Assign</button>
+    {% if playlist %}<a href="/playlists/{{ playlist.id }}">open “{{ playlist.name }}”</a>{% endif %}
+  </form>
+  <div class="row" style="margin-top:.8rem">
+    {% if p.playlist_id %}
+    <form method="post" action="/players/{{ p.id }}/unassign" class="row">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <span class="muted">Unassign — clear the screen too?</span>
+      <button type="submit" name="clear" value="yes" class="danger">Yes, clear</button>
+      <button type="submit" name="clear" value="no" class="secondary">No, keep last list</button>
+    </form>
+    {% endif %}
+    {% if p.cleared %}
+    <form method="post" action="/players/{{ p.id }}/resume" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary">Resume</button>
+    </form>
+    {% else %}
+    <form method="post" action="/players/{{ p.id }}/clear" class="inline"
+          data-confirm="Clear the screen of {{ p.label }}? It cuts what is playing and shows the fallback image until you resume or assign a playlist.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="danger">Clear screen</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Commands</h2>
+  <p class="muted">Delivered at the next heartbeat. A command not delivered within 15 minutes expires.</p>
+  <div class="row">
+    {% for name in command_names %}
+    <form method="post" action="/players/{{ p.id }}/commands" class="inline"
+          {% if name == "reboot" %}data-confirm="Reboot {{ p.label }}? The screen goes dark for about a minute."{% endif %}>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="name" value="{{ name }}">
+      <button type="submit" class="{{ 'danger' if name == 'reboot' else 'secondary' }}">{{ name }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  <table style="margin-top:.8rem">
+    <thead><tr><th>ID</th><th>Command</th><th>Created</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for c in commands %}
+      <tr>
+        <td>{{ c.id }}</td><td>{{ c.name }}</td><td class="mono">{{ c.created_at }}</td>
+        <td>
+          {% if c.acked_at %}<span class="badge ok">acked</span> <span class="mono muted">{{ c.acked_at }}</span>
+          {% elif c.expired_at %}<span class="badge bad">expired</span>
+          {% elif c.delivered_at %}<span class="badge warn">delivered</span>
+          {% else %}<span class="badge">pending</span>{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="muted">No commands yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

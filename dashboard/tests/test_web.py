@@ -128,3 +128,50 @@ def test_unassign_requires_explicit_choice(client, admin, app_store):
 def test_unknown_ids_are_404(client, admin):
     assert client.get("/playlists/999").status_code == 404
     assert admin("/players/999/clear").status_code == 404
+
+
+def test_player_page_status_and_commands(client, admin, app_store, app):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
+    app.state.coral.clock = lambda: now
+    pl = app_store.create_playlist("Loja")
+    app_store.add_item(pl, add_media(app_store, 1))
+    pid = app_store.create_player("pombal", hash_token("tok"), playlist_id=pl)
+
+    page = client.get(f"/players/{pid}").text
+    assert "No heartbeat received yet" in page
+    assert "offline" in client.get("/players").text
+
+    state = {
+        "agent_version": "0.2.0",
+        "player_time": "x",
+        "playlist_hash_applied": None,
+        "playlist_hash_seen": app_store.player_etag(app_store.get_player(pid)),
+        "cleared": False,
+        "clock_drift": True,
+        "mpv": {"state": "playing", "current_file": "abc.png", "progressing": True, "restarts": 2},
+        "sync": {"last_ok": None, "last_error": "network error"},
+        "update": {"state": "idle", "last_error": None},
+        "system": {"disk_free_mb": 2048, "temp_c": 48.5, "uptime_s": 3600},
+        "acked_commands": [],
+    }
+    app_store.record_heartbeat(pid, state, now)
+    listing = client.get("/players").text
+    assert "online" in listing and "0.2.0" in listing and "clock drift" in listing
+    detail = client.get(f"/players/{pid}").text
+    assert "in sync" in detail and "2 mpv restart(s)" in detail and "network error" in detail
+
+    response = admin(f"/players/{pid}/commands", name="sync-now")
+    assert "sync-now queued" in response.text
+    assert "pending" in client.get(f"/players/{pid}").text
+    bad = admin(f"/players/{pid}/commands", name="shutdown")
+    assert "Unknown command" in bad.text
+    assert [c["name"] for c in app_store.list_commands(pid)] == ["sync-now"]
+
+
+def test_commands_require_csrf(client, app_store):
+    login(client)
+    pid = app_store.create_player("pombal", hash_token("tok"))
+    assert client.post(f"/players/{pid}/commands", data={"name": "reboot"}).status_code == 403
+    assert app_store.list_commands(pid) == []

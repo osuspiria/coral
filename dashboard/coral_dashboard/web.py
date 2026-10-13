@@ -14,9 +14,25 @@ from fastapi.templating import Jinja2Templates
 from . import media
 from .auth import LOGIN_COOKIE, SESSION_COOKIE, Session, verify_password
 from .deps import AppState, app_state, get_store, require_admin
-from .repo import Conflict, Store
+from .repo import COMMANDS, Conflict, Store
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+
+def _human_seconds(seconds: int | float | None) -> str:
+    if seconds is None:
+        return "never"
+    seconds = int(seconds)
+    if seconds < 90:
+        return f"{seconds} s"
+    if seconds < 5400:
+        return f"{seconds // 60} min"
+    if seconds < 172800:
+        return f"{seconds // 3600} h"
+    return f"{seconds // 86400} d"
+
+
+templates.env.filters["human_seconds"] = _human_seconds
 router = APIRouter()
 
 
@@ -103,12 +119,55 @@ def players_page(
     session: Session = Depends(require_admin),
     store: Store = Depends(get_store),
 ) -> HTMLResponse:
+    state: AppState = request.app.state.coral
+    now = state.clock()
+    rows = [
+        (p, store.player_status(p, now, state.settings.heartbeat_interval_s))
+        for p in store.list_players()
+    ]
+    return render(request, "players.html", session, rows=rows, playlists=store.list_playlists())
+
+
+@router.get("/players/{player_id}", response_class=HTMLResponse)
+def player_page(
+    player_id: int,
+    request: Request,
+    session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> HTMLResponse:
+    state: AppState = request.app.state.coral
+    player = store.get_player(player_id)
+    status = store.player_status(player, state.clock(), state.settings.heartbeat_interval_s)
+    playlist = store.get_playlist(player["playlist_id"]) if player["playlist_id"] else None
     return render(
         request,
-        "players.html",
+        "player.html",
         session,
-        players=store.list_players(),
+        p=player,
+        s=status,
+        playlist=playlist,
+        commands=store.list_commands(player_id),
+        command_names=COMMANDS,
         playlists=store.list_playlists(),
+    )
+
+
+@router.post("/players/{player_id}/commands")
+def send_command(
+    player_id: int,
+    name: str = Form(...),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    """Queue a command from the closed list (spec 5.2)."""
+    try:
+        store.queue_command(player_id, name)
+    except (ValueError, Conflict) as exc:
+        return redirect(f"/players/{player_id}", error=str(exc))
+    return redirect(
+        f"/players/{player_id}",
+        notice=f"{name} queued. It reaches the player at its next heartbeat"
+        " and expires if not delivered within 15 minutes.",
     )
 
 
@@ -338,11 +397,11 @@ def assign_playlist(
             raise ValueError("Choose a playlist")
         store.assign_playlist(player_id, target)
     except ValueError as exc:
-        return redirect("/players", error=str(exc))
+        return redirect(f"/players/{player_id}", error=str(exc))
     notice = "Playlist assigned."
     if not store.list_items(target):
         notice += " " + EMPTY_ASSIGNED_WARNING
-    return redirect("/players", notice=notice)
+    return redirect(f"/players/{player_id}", notice=notice)
 
 
 @router.post("/players/{player_id}/unassign")
@@ -355,11 +414,13 @@ def unassign_playlist(
     """Unassigning asks "Clear the screen too?": clear=yes is an explicit clear,
     clear=no keeps the player's last list."""
     if clear not in {"yes", "no"}:
-        return redirect("/players", error="Choose whether to clear the screen.")
+        return redirect(f"/players/{player_id}", error="Choose whether to clear the screen.")
     store.unassign_playlist(player_id, clear=clear == "yes")
     if clear == "yes":
-        return redirect("/players", notice="Playlist unassigned and screen cleared.")
-    return redirect("/players", notice="Playlist unassigned. The player keeps its last list.")
+        return redirect(f"/players/{player_id}", notice="Playlist unassigned and screen cleared.")
+    return redirect(
+        f"/players/{player_id}", notice="Playlist unassigned. The player keeps its last list."
+    )
 
 
 @router.post("/players/{player_id}/clear")
@@ -370,8 +431,8 @@ def clear_screen(
 ) -> Response:
     store.set_cleared(player_id, True)
     return redirect(
-        "/players",
-        notice="Screen cleared. The player cuts to the fallback image at its next check.",
+        f"/players/{player_id}",
+        notice="Screen cleared. The player cuts to the fallback image at its next heartbeat.",
     )
 
 
@@ -382,4 +443,4 @@ def resume_screen(
     store: Store = Depends(get_store),
 ) -> Response:
     store.set_cleared(player_id, False)
-    return redirect("/players", notice="Screen resumed.")
+    return redirect(f"/players/{player_id}", notice="Screen resumed.")
