@@ -28,6 +28,7 @@ from . import __version__
 from .changes import Backoff, ChangeSource, SyncTrigger
 from .client import HeartbeatResponse, ServerClient, ServerError, Unauthorized, utc_now
 from .clock import ClockGuard
+from .commands import CommandExecutor
 from .config import Config
 from .fsutil import atomic_write_json, read_json
 from .health import MpvHealth
@@ -85,6 +86,7 @@ class Agent:
         self.heartbeat_interval_s = DEFAULT_HEARTBEAT_S
         self.heartbeat_backoff = Backoff(config.backoff_min_s, config.backoff_max_s)
         self._rng = random.Random()  # noqa: S311 (jitter, not security)
+        self.commands = CommandExecutor(lambda: self.state, self._save, changes, self.actions)
 
     # ------------------------------------------------------------- manifest
 
@@ -317,13 +319,14 @@ class Agent:
             "sync": {"last_ok": self.state.last_sync_ok, "last_error": self.state.last_sync_error},
             "update": {"state": "idle", "last_error": None},  # phase 3
             "system": system_report(self.config.data_dir),
-            "acked_commands": [],
+            "acked_commands": self.commands.acks_to_send(),
         }
 
     async def heartbeat_once(self) -> HeartbeatResponse | None:
         """Send one heartbeat and act on the answer. Returns None on failure."""
+        body = self.heartbeat_body()
         try:
-            response = await asyncio.to_thread(self.client.post_heartbeat, self.heartbeat_body())
+            response = await asyncio.to_thread(self.client.post_heartbeat, body)
         except Unauthorized as exc:
             self._heartbeat_failed(f"{exc}; playing the local cache")
             return None
@@ -331,6 +334,7 @@ class Agent:
             self._heartbeat_failed(str(exc))
             return None
         self.heartbeat_backoff.reset()
+        self.commands.acks_delivered(body["acked_commands"])
         self.heartbeat_interval_s = response.interval_s
         self.state.last_heartbeat_ok = self.now().isoformat()
         self.state.last_heartbeat_error = None
@@ -347,8 +351,7 @@ class Agent:
         self._save()
 
     async def handle_commands(self, response: HeartbeatResponse) -> None:
-        for command in response.commands:
-            log.warning("Ignoring command %s (%s): not supported yet", command.id, command.name)
+        await self.commands.handle(response.commands)
 
     def next_heartbeat_delay(self) -> float:
         if self.heartbeat_backoff.failures:

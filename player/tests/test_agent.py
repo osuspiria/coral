@@ -634,3 +634,62 @@ def test_server_time_skew_sets_clock_drift(scenario):
         assert agent.state.clock_drift is False
 
     scenario(body)
+
+
+# ---------------------------------------------------------------- commands
+
+
+def test_sync_now_forces_full_check(scenario):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        h.server.commands = [{"id": 7, "name": "sync-now"}]
+        await agent.heartbeat_once()
+        assert agent.changes._wake.is_set() and agent.changes._force_full
+        assert agent.state.pending_acks == [7]
+        await agent.heartbeat_once()  # ack delivered, server stops sending it
+        assert h.server.heartbeats[-1]["acked_commands"] == [7]
+        assert h.server.commands == []
+        assert agent.state.pending_acks == []
+
+    scenario(body)
+
+
+def test_restart_player_restarts_mpv(scenario):
+    async def body(h):
+        agent = await h.start()
+        h.server.commands = [{"id": 8, "name": "restart-player"}]
+        await agent.heartbeat_once()
+        assert h.actions.calls == ["restart_mpv"]
+
+    scenario(body)
+
+
+def test_reboot_runs_once_even_if_resent(scenario):
+    async def body(h):
+        agent = await h.start()
+        h.server.commands = [{"id": 9, "name": "reboot"}]
+        h.server.heartbeat_status = 200
+        await agent.heartbeat_once()
+        assert h.actions.calls == ["reboot"]
+        # The machine "rebooted" before the ack reached the server: same id again.
+        agent = await h.reboot()
+        await agent.heartbeat_once()
+        assert h.actions.calls == ["reboot"]  # not executed a second time
+        assert h.server.heartbeats[-1]["acked_commands"] == [9]
+        await agent.heartbeat_once()
+        assert h.server.commands == []
+
+    scenario(body)
+
+
+def test_unknown_command_is_never_executed(scenario):
+    async def body(h):
+        agent = await h.start()
+        h.server.commands = [{"id": 10, "name": "rm -rf /"}, {"id": "x", "name": "reboot"}]
+        await agent.heartbeat_once()
+        assert h.actions.calls == []
+        assert agent.state.pending_acks == [10]  # acked so the server stops sending it
+
+    scenario(body)

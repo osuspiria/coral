@@ -41,6 +41,9 @@ class State:
     last_heartbeat_ok: str | None = None
     last_heartbeat_error: str | None = None
     clock_drift: bool = False
+    # Remote commands: ids already executed (never run twice) and acks still to send.
+    executed_command_ids: list[int] = field(default_factory=list)
+    pending_acks: list[int] = field(default_factory=list)
     # sha256-named files no longer referenced, with the time they became unused.
     orphaned_since: dict[str, str] = field(default_factory=dict)
 
@@ -70,6 +73,11 @@ class State:
             setattr(state, name, value if isinstance(value, str) else None)
         state.cleared = bool(data.get("cleared", False))
         state.clock_drift = bool(data.get("clock_drift", False))
+        for name in ("executed_command_ids", "pending_acks"):
+            values = data.get(name, [])
+            if isinstance(values, list):
+                ints = [v for v in values if isinstance(v, int) and not isinstance(v, bool)]
+                setattr(state, name, ints)
         orphaned = data.get("orphaned_since", {})
         if isinstance(orphaned, dict):
             state.orphaned_since = {str(k): str(v) for k, v in orphaned.items()}
