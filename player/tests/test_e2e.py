@@ -117,12 +117,9 @@ def test_player_follows_assigned_playlist(dashboard, tmp_path):
             mpv.finish_current()
             await wait_for(lambda: names() == [f"{s}.png" for s in sha])
 
-            # 3. Clear screen -> fallback once the current item ends.
+            # 3. Clear screen -> fallback at once (explicit clear cuts the current item).
             store.set_cleared(player, True)
             fallback = str(tmp_path / "fallback.png")
-            # Wait until the fallback is queued in mpv (state.cleared is set earlier).
-            await wait_for(lambda: mpv.filenames()[-1:] == [fallback])
-            mpv.finish_current()
             await wait_for(lambda: mpv.filenames() == [fallback])
 
             # 4. Resume -> content again, the fallback is left at once.

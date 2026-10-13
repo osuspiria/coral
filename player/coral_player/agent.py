@@ -6,7 +6,8 @@ Flow (spec §2.3, §4.4, §4.5):
   promotes it only when every file is verified; CLEAR promotes it and shows the
   fallback; KEEP (no playlist assigned) changes nothing;
 - the engine filters the promoted manifest by date, every 5 min and after local
-  midnight, and pushes the result to mpv without interrupting the current item;
+  midnight, and pushes the result to mpv without interrupting the current item
+  (the one exception is an explicit clear, which cuts to the fallback at once);
 - with an invalid clock, the last list sent to mpv stays.
 
 Every failure keeps the screen as it is and is logged and recorded in state.json.
@@ -65,6 +66,8 @@ class Agent:
             self.ipc, config.media_dir, config.fallback_image, config.fallback_duration_s
         )
         self._tasks: set[asyncio.Task[Any]] = set()
+        # Set by an explicit clear: the fallback replaces the current item at once.
+        self._interrupt_pending = False
         self.mpv_ready = asyncio.Event()
 
     # ------------------------------------------------------------- manifest
@@ -131,8 +134,11 @@ class Agent:
                 "Applied manifest %s (%d items)", manifest.playlist_hash[:12], len(manifest.items)
             )
         elif manifest.action is Action.CLEAR:
+            if not self.state.cleared:
+                # Explicit admin action: the only case that cuts the current item.
+                self._interrupt_pending = True
             self._promote(manifest)
-            log.warning("Screen cleared by the dashboard; showing the fallback image")
+            log.warning("Screen cleared by the dashboard; showing the fallback image now")
         else:
             log.info("No playlist assigned to this player; keeping what is playing")
 
@@ -193,10 +199,13 @@ class Agent:
     async def _push(self) -> None:
         if not self.ipc.connected:
             return
+        interrupt = self._interrupt_pending and not self.state.playing
         try:
-            await self.controller.apply(self.state.playing)
+            await self.controller.apply(self.state.playing, interrupt=interrupt)
         except MpvError as exc:
             log.error("Could not apply the list to mpv: %s", exc)
+            return
+        self._interrupt_pending = False
 
     # ------------------------------------------------------------------ mpv
 

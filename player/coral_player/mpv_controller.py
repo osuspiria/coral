@@ -10,7 +10,8 @@ cycling even if the agent dies. To apply a new list:
    `playlist-remove` on the next `start-file` event, i.e. after it finished.
 
 `loadlist`/`loadfile ... replace` are never used for content, because they
-restart the current item. When the item on screen is the fallback image, the
+restart the current item. An explicit "Clear screen" is the one exception that
+cuts the current item (`interrupt=True`). When the item on screen is the fallback image, the
 controller skips to the new list right away (`playlist-next`): nothing to finish.
 """
 
@@ -72,8 +73,12 @@ class MpvController:
             kwargs["options"] = ",".join(f"{k}={v}" for k, v in opts.items())
         await self.ipc.command_named("loadfile", **kwargs)
 
-    async def apply(self, entries: list[PlayEntry]) -> bool:
-        """Make mpv play `entries` (fallback if empty). Returns True if anything changed."""
+    async def apply(self, entries: list[PlayEntry], *, interrupt: bool = False) -> bool:
+        """Make mpv play `entries` (fallback if empty). Returns True if anything changed.
+
+        `interrupt` cuts the current item instead of letting it finish. Only an explicit
+        "Clear screen" from the dashboard uses it.
+        """
         async with self._lock:
             if self.applied is not None and entries == self.applied:
                 return False
@@ -90,7 +95,10 @@ class MpvController:
                 for path, opts in targets:
                     await self._loadfile(path, "append", opts)
                 self._stale_ids.add(int(current["id"]))
-                if self._is_fallback(current.get("filename")) and entries:
+                if interrupt:
+                    await self.ipc.command("playlist-next", "force")
+                    log.info("Cut the current item for a list of %d entries", len(targets))
+                elif self._is_fallback(current.get("filename")) and entries:
                     # Nothing worth finishing on screen: leave the fallback right away.
                     await self.ipc.command("playlist-next", "force")
                     log.info("Replaced the fallback with a list of %d entries", len(targets))

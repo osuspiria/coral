@@ -369,7 +369,10 @@ def clear_screen(
     store: Store = Depends(get_store),
 ) -> Response:
     store.set_cleared(player_id, True)
-    return redirect("/players", notice="Screen cleared. The player will show the fallback image.")
+    return redirect(
+        "/players",
+        notice="Screen cleared. The player cuts to the fallback image at its next check.",
+    )
 
 
 @router.post("/players/{player_id}/resume")

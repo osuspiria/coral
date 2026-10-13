@@ -238,12 +238,13 @@ def test_cleared_shows_fallback_and_keeps_cache(scenario):
         h.publish(1)
         agent = await h.start()
         await agent.sync_once(FULL)
+        playing = h.mpv.current_entry
         h.server.manifest = make_manifest([], cleared=True)
         assert await agent.sync_once(POLL)
         assert agent.state.cleared is True
-        h.mpv.finish_current()
-        await h.settle()
+        # Explicit clear: the current item is cut, the fallback shows at once.
         assert (await h.playlist()) == [h.fallback]
+        assert h.mpv.current_entry is not playing
         assert Path(h.file(1)).name in h.media_files()  # grace period
 
         # Restoring the same playlist needs no download.
@@ -293,9 +294,7 @@ def test_unassign_with_clear_shows_fallback(scenario):
         await agent.sync_once(FULL)
         h.server.manifest = make_manifest([], assigned=False, cleared=True)
         assert await agent.sync_once(POLL)
-        h.mpv.finish_current()
-        await h.settle()
-        assert (await h.playlist()) == [h.fallback]
+        assert (await h.playlist()) == [h.fallback]  # immediate, like Clear screen
 
     scenario(body)
 
@@ -432,5 +431,39 @@ def test_disk_full_keeps_previous_list(scenario, tmp_path):
         assert not await agent.sync_once(POLL)
         assert "disk space" in agent.state.last_sync_error
         assert (await h.playlist()) == [h.file(1)]
+
+    scenario(body)
+
+
+def test_repeated_cleared_manifest_does_not_cut_again(scenario):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        h.server.manifest = make_manifest([], cleared=True)
+        await agent.sync_once(POLL)
+        starts = len(h.mpv.starts)
+        await agent.sync_once(FULL)  # same cleared manifest again (periodic full check)
+        await h.settle()
+        assert len(h.mpv.starts) == starts
+
+    scenario(body)
+
+
+def test_no_valid_items_today_waits_for_current_item(scenario):
+    """Only an explicit clear cuts the current item; date expiry does not."""
+
+    async def body(h):
+        h.publish((1, {"end": "2026-10-13"}))
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        playing = h.mpv.current_entry
+        h.clock.value += timedelta(hours=13)  # item expired at midnight
+        await agent.evaluate()
+        await h.settle()
+        assert h.mpv.current_entry is playing
+        assert (await h.playlist()) == [h.file(1), h.fallback]
+        h.mpv.finish_current()
+        assert (await h.playlist()) == [h.fallback]
 
     scenario(body)

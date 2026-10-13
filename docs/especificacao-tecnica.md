@@ -148,7 +148,7 @@ Notas: a ordem usa `position` (não `order`, que é palavra reservada em SQL). A
   ```
 - Estado **online/offline calculado pelo servidor**: offline se `now - last_seen > 3 × intervalo` (por omissão 3 min). Mostra também: hash aplicado vs. desejado, último sync (OK/erro), espaço livre, temperatura, uptime, estado de update.
 - Atribuir playlist, canal (canary/stable), versão desejada, e enviar comandos da lista fechada (secção 5.2).
-- **Limpar o ecrã (ação explícita):** "Clear screen" por player, com confirmação, grava `players.cleared = 1`; o manifest desse player passa a ser `"cleared": true` com `"items": []` e o player mostra o fallback. "Resume" ou atribuir uma playlist repõe `cleared = 0`. A limpeza nunca é deduzida de uma lista vazia.
+- **Limpar o ecrã (ação explícita):** "Clear screen" por player, com confirmação, grava `players.cleared = 1`; o manifest desse player passa a ser `"cleared": true` com `"items": []` e o player mostra o fallback **de imediato, cortando o item em reprodução** (única exceção à regra de não interromper; ver secção 4.5). "Resume" ou atribuir uma playlist repõe `cleared = 0`. A limpeza nunca é deduzida de uma lista vazia.
 - **Retirar a playlist** a um player pergunta *"Clear the screen too?"*: se sim, é uma limpeza explícita (como acima); se não, o player mantém a última lista que tem.
 - A partir da fase 2, o estado `cleared` é reportado no heartbeat e mostrado no dashboard em vez de uma lista desatualizada.
 
@@ -238,7 +238,7 @@ Três serviços em vez de quatro: heartbeat, sync e playlist vivem no mesmo agen
 
 **Reprodução (mpv)**
 - DRM/KMS sem X11 (`--vo=gpu --gpu-context=drm`; alternativa `--vo=drm`, a validar no Pi 5), `--idle=yes`, `--force-window=yes`, `--loop-playlist=inf`, socket IPC `--input-ipc-server=/run/signage/mpv.sock`.
-- **Aplicar uma nova lista não pode interromper o item em reprodução.** O `loadlist` em modo substituição reinicia o item; a implementação deve usar `playlist-clear` + `loadfile … append` (ou o agente controlar a sequência com `loadfile` no fim de cada item). O comportamento exato **tem de ser testado**.
+- **Aplicar uma nova lista não pode interromper o item em reprodução.** O `loadlist` em modo substituição reinicia o item; a implementação deve usar `playlist-clear` + `loadfile … append` (ou o agente controlar a sequência com `loadfile` no fim de cada item). O comportamento exato **tem de ser testado**. **Exceção:** uma limpeza explícita (`cleared: true`, ação "Clear screen" ou retirar a playlist com limpeza) corta o item atual e mostra logo o fallback, porque é uma ação deliberada do admin e um vídeo longo podia atrasá-la muitos minutos. Itens que deixam de ser válidos pelas datas continuam a esperar pelo fim do item atual.
 - Duração de imagens: por item (`image_duration_s`) ou valor por omissão (ex.: 10 s).
 - **Playlist vazia ou sem itens válidos hoje:** o mpv mostra a imagem de fallback incluída na release (`assets/fallback.png`). Nunca fica ecrã preto.
 
@@ -383,7 +383,7 @@ Estes cenários devem ser testados antes de produção.
 | VPS em baixo | Igual ao anterior; alerta externo avisa que o dashboard caiu |
 | Ficheiro corrompido/incompleto | Falha a verificação sha256; não é promovido; playlist anterior mantém-se; erro reportado |
 | Manifest vazio (sem `cleared`) ou inválido | Recusado; nada é apagado; alerta |
-| Limpeza explícita (`cleared: true`) | Aceite; mostra o fallback; cache mantida pelo período de graça |
+| Limpeza explícita (`cleared: true`) | Aceite; corta o item atual e mostra logo o fallback; cache mantida pelo período de graça |
 | Player sem playlist atribuída (`assigned: false`) | Mantém o que tem; no primeiro arranque mostra o fallback |
 | Manifest responde 404 ou 5xx | Nunca limpa; mantém a lista atual; erro reportado |
 | Playlist sem itens válidos hoje | Mostra o fallback; não fica ecrã preto |

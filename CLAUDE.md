@@ -32,7 +32,7 @@ A especificação completa está em `docs/especificacao-tecnica.md` (v1.2). É a
 
 1. O player **nunca** fica com ecrã preto: playlist vazia ou sem itens válidos → imagem de fallback incluída na release.
 2. Uma playlist nova **só é aplicada com todos os ficheiros presentes e verificados** (sha256 + tamanho). An empty manifest without an explicit cleared flag is refused and never deletes anything; an invalid manifest is also refused.
-3. Aplicar uma playlist nova **não pode interromper o item em reprodução** (testar o comportamento do mpv; `loadlist` em modo substituição reinicia o item).
+3. Aplicar uma playlist nova **não pode interromper o item em reprodução** (testar o comportamento do mpv; `loadlist` em modo substituição reinicia o item). Única exceção: uma limpeza explícita do ecrã (`cleared: true`) corta logo para o fallback.
 4. Falhas (rede, VPS, ficheiro corrompido, update mau) deixam o ecrã a tocar conteúdo válido e são **reportadas**, nunca silenciadas.
 5. **Comandos remotos só de uma lista fechada** (`sync-now`, `restart-player`, `reboot`). Nunca shell nem texto arbitrário.
 6. O player só instala releases com assinatura válida.

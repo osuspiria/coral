@@ -202,3 +202,17 @@ def test_fallback_given_through_another_path_is_recognised():
         await mpv.stop()
 
     run(scenario())
+
+
+def test_interrupt_cuts_current_item():
+    async def scenario():
+        mpv, ipc, ctl = await setup()
+        await ctl.apply([entry(1, "video")])
+        await ctl.apply([], interrupt=True)
+        await settle()
+        assert mpv.filenames() == [str(FALLBACK)]
+        assert mpv.current_entry.filename == str(FALLBACK)
+        await ipc.close()
+        await mpv.stop()
+
+    run(scenario())
