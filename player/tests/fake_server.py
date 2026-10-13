@@ -17,7 +17,7 @@ class FakeServer:
         self.files: dict[str, bytes] = {}
         self.corrupt: set[str] = set()  # serve wrong bytes for these sha256
         self.cut_after: dict[str, int] = {}  # close the connection after N bytes (once)
-        self.server_time = None  # datetime for the Date header, None = real time
+        self.server_time = None  # datetime (or callable) for the Date header; None = real
         self.requests: list[tuple[str, dict[str, str]]] = []
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
@@ -45,8 +45,9 @@ class FakeServer:
                 pass
 
             def date_time_string(self, timestamp=None):
-                if fake.server_time is not None:
-                    return format_datetime(fake.server_time, usegmt=True)
+                value = fake.server_time() if callable(fake.server_time) else fake.server_time
+                if value is not None:
+                    return format_datetime(value, usegmt=True)
                 return super().date_time_string(timestamp)
 
             def _send(self, status, body=b"", headers=None):

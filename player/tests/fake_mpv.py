@@ -47,7 +47,7 @@ class FakeMpv:
         if self.playlist:
             self.current = 0
             self.starts.append(self.playlist[0])
-        self._server = await asyncio.start_server(self._client, "127.0.0.1", 0)
+        self._server = await asyncio.start_server(self._client, "127.0.0.1", self.port)
         self.port = self._server.sockets[0].getsockname()[1]
         return self
 

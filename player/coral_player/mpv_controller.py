@@ -97,7 +97,11 @@ class MpvController:
             stale = {i for i in self._stale_ids if i != playing_entry_id}
             if not stale:
                 return
-            playlist = await self.ipc.get_property("playlist") or []
+            try:
+                playlist = await self.ipc.get_property("playlist") or []
+            except MpvError as exc:
+                log.warning("Could not read the mpv playlist: %s", exc)
+                return
             # Remove from the end so earlier indexes stay valid.
             for index in sorted(
                 (i for i, e in enumerate(playlist) if e.get("id") in stale), reverse=True
