@@ -6,6 +6,7 @@ Every mutation that can change what a player sees refreshes the stored
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -13,6 +14,10 @@ from typing import Any
 
 from .db import now_iso, transaction
 from .manifest import ManifestContext, build_manifest
+
+COMMANDS = ("sync-now", "restart-player", "reboot")
+COMMAND_TTL = timedelta(minutes=15)
+OFFLINE_FACTOR = 3  # offline after 3 missed heartbeats (spec 3.3)
 
 
 class NotFound(Exception):
@@ -28,6 +33,15 @@ _ITEM_COLUMNS = """
     pi.image_duration_s, m.sha256, m.stored_name, m.original_name, m.kind, m.size,
     m.duration_s, m.width, m.height, m.deleted_at
 """
+
+
+@dataclass(frozen=True)
+class PlayerStatus:
+    online: bool
+    seen_ago_s: int | None
+    state: dict[str, Any]
+    desired_hash: str | None
+    in_sync: bool
 
 
 @dataclass
@@ -348,6 +362,87 @@ class Store:
         ).fetchone()
         return row is not None
 
+    # ---------------------------------------------------- heartbeat, commands
+
+    def record_heartbeat(self, player_id: int, state: dict[str, Any], now: datetime) -> None:
+        self.conn.execute(
+            "UPDATE players SET last_seen = ?, last_state = ? WHERE id = ?",
+            (_iso(now), json.dumps(state, sort_keys=True), player_id),
+        )
+
+    def queue_command(self, player_id: int, name: str, now: datetime | None = None) -> int:
+        if name not in COMMANDS:
+            raise ValueError(f"Unknown command {name!r}")
+        player = self.get_player(player_id)
+        if player["revoked"]:
+            raise Conflict("The player is revoked")
+        cur = self.conn.execute(
+            "INSERT INTO player_commands (player_id, name, created_at) VALUES (?, ?, ?)",
+            (player_id, name, _iso(now or datetime.now(UTC))),
+        )
+        return int(cur.lastrowid)
+
+    def deliver_commands(self, player_id: int, now: datetime) -> list[sqlite3.Row]:
+        """Open commands for a heartbeat. Commands never delivered within COMMAND_TTL
+        expire first; delivered but unacknowledged ones are sent again (the player
+        ignores ids it already executed)."""
+        with transaction(self.conn):
+            self.conn.execute(
+                "UPDATE player_commands SET expired_at = ? WHERE player_id = ?"
+                " AND delivered_at IS NULL AND acked_at IS NULL AND expired_at IS NULL"
+                " AND created_at <= ?",
+                (_iso(now), player_id, _iso(now - COMMAND_TTL)),
+            )
+            rows = self.conn.execute(
+                "SELECT * FROM player_commands WHERE player_id = ?"
+                " AND acked_at IS NULL AND expired_at IS NULL ORDER BY id",
+                (player_id,),
+            ).fetchall()
+            self.conn.execute(
+                "UPDATE player_commands SET delivered_at = ? WHERE player_id = ?"
+                " AND delivered_at IS NULL AND acked_at IS NULL AND expired_at IS NULL",
+                (_iso(now), player_id),
+            )
+            return rows
+
+    def ack_commands(self, player_id: int, ids: list[int], now: datetime) -> None:
+        self.conn.executemany(
+            "UPDATE player_commands SET acked_at = ? WHERE id = ? AND player_id = ?"
+            " AND acked_at IS NULL",
+            [(_iso(now), command_id, player_id) for command_id in ids],
+        )
+
+    def list_commands(self, player_id: int, limit: int = 20) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM player_commands WHERE player_id = ? ORDER BY id DESC LIMIT ?",
+            (player_id, limit),
+        ).fetchall()
+
+    def player_status(
+        self, player: sqlite3.Row, now: datetime, heartbeat_interval_s: int
+    ) -> PlayerStatus:
+        """Online/offline is computed here from last_seen, never stored."""
+        state: dict[str, Any] = {}
+        if player["last_state"]:
+            try:
+                state = json.loads(player["last_state"])
+            except ValueError:
+                state = {}
+        seen_ago = None
+        if player["last_seen"]:
+            seen_ago = max(
+                0, int((now - datetime.fromisoformat(player["last_seen"])).total_seconds())
+            )
+        online = seen_ago is not None and seen_ago <= OFFLINE_FACTOR * heartbeat_interval_s
+        desired = None if player["revoked"] else self.player_etag(player)
+        return PlayerStatus(
+            online=online,
+            seen_ago_s=seen_ago,
+            state=state,
+            desired_hash=desired,
+            in_sync=bool(state) and state.get("playlist_hash_seen") == desired,
+        )
+
 
 def _clean_name(name: str) -> str:
     name = name.strip()
@@ -373,3 +468,7 @@ def _check_dates(start_date: str | None, end_date: str | None) -> None:
 def _check_duration(image_duration_s: int | None) -> None:
     if image_duration_s is not None and not (1 <= image_duration_s <= 86400):
         raise ValueError("Image duration must be between 1 and 86400 seconds")
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(UTC).replace(microsecond=0).isoformat()
