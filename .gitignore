@@ -11,3 +11,6 @@ token
 *.db
 player/config.dev.toml
 *.tar.gz
+/dist/
+*.minisig
+*.key
