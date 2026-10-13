@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ playlist.name }}{% endblock %}
+{% block content %}
+<h1>Playlist: {{ playlist.name }}</h1>
+{% if empty_warning %}<p class="msg warning">This playlist is empty. {{ empty_warning }}</p>{% endif %}
+<p class="muted">
+  Used by: {% for p in players %}{{ p.label }}{% if not loop.last %}, {% endif %}{% else %}no player{% endfor %}.
+  Dates are inclusive, in {{ timezone }}; empty means no limit. Empty image duration means {{ default_image_duration }} s.
+  <span class="mono">hash {{ playlist.playlist_hash[:12] }}</span>
+</p>
+
+<table>
+  <thead><tr><th>#</th><th>Media</th><th>Start</th><th>End</th><th>Image s</th><th></th><th>Move to</th><th></th></tr></thead>
+  <tbody>
+  {% for it in items %}
+    <tr>
+      <td>{{ it.position }}
+        <form method="post" action="/items/{{ it.id }}/update" id="upd-{{ it.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        </form>
+      </td>
+      <td>{{ it.original_name }} <span class="muted">({{ it.kind }}{% if it.deleted_at %}, deleted from library{% endif %})</span></td>
+      <td><input type="date" name="start_date" value="{{ it.start_date or '' }}" form="upd-{{ it.id }}"></td>
+      <td><input type="date" name="end_date" value="{{ it.end_date or '' }}" form="upd-{{ it.id }}"></td>
+      <td>{% if it.kind == "image" %}<input type="number" min="1" max="86400" name="image_duration_s" value="{{ it.image_duration_s or '' }}" placeholder="{{ default_image_duration }}" form="upd-{{ it.id }}">{% else %}<span class="muted">{{ "%.1f"|format(it.duration_s or 0) }} s</span>{% endif %}</td>
+      <td><button type="submit" class="secondary" form="upd-{{ it.id }}">Save</button></td>
+      <td>
+        <form method="post" action="/items/{{ it.id }}/move" class="row">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="number" name="position" min="1" max="{{ items|length }}" value="{{ it.position }}">
+          <button type="submit" class="secondary">Move</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="/items/{{ it.id }}/remove" class="inline" data-confirm="Remove this item from the playlist?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="danger">Remove</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="muted">No items.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Add item</h2>
+<form method="post" action="/playlists/{{ playlist.id }}/items" class="card row">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Media
+    <select name="media_id" required>
+      {% for m in media %}<option value="{{ m.id }}">{{ m.original_name }} ({{ m.kind }})</option>{% endfor %}
+    </select>
+  </label>
+  <label>Start <input type="date" name="start_date"></label>
+  <label>End <input type="date" name="end_date"></label>
+  <label>Image s <input type="number" name="image_duration_s" min="1" max="86400" placeholder="{{ default_image_duration }}"></label>
+  <button type="submit">Add</button>
+</form>
+
+<h2>Settings</h2>
+<div class="card row">
+  <form method="post" action="/playlists/{{ playlist.id }}/rename" class="row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="name" value="{{ playlist.name }}" maxlength="100" required>
+    <button type="submit" class="secondary">Rename</button>
+  </form>
+  <form method="post" action="/playlists/{{ playlist.id }}/delete" class="inline" data-confirm="Delete playlist {{ playlist.name }}?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="danger">Delete playlist</button>
+  </form>
+</div>
+{% endblock %}

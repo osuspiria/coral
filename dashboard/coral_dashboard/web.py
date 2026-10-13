@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from . import media
 from .auth import LOGIN_COOKIE, SESSION_COOKIE, Session, verify_password
 from .deps import AppState, app_state, get_store, require_admin
-from .repo import Store
+from .repo import Conflict, Store
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 router = APIRouter()
@@ -154,3 +154,229 @@ def delete_media(
         "/media",
         notice="Media removed from the library. Playlists using it keep playing it.",
     )
+
+
+# -------------------------------------------------------------- playlists
+
+EMPTY_ASSIGNED_WARNING = "This won't clear the screens. Use Clear screen if that's what you want."
+
+
+def _opt_str(value: str) -> str | None:
+    value = value.strip()
+    return value or None
+
+
+def _opt_int(value: str) -> int | None:
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{value!r} is not a whole number") from exc
+
+
+@router.get("/playlists", response_class=HTMLResponse)
+def playlists_page(
+    request: Request,
+    session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> HTMLResponse:
+    return render(request, "playlists.html", session, playlists=store.list_playlists())
+
+
+@router.post("/playlists")
+def create_playlist(
+    name: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        playlist_id = store.create_playlist(name)
+    except ValueError as exc:
+        return redirect("/playlists", error=str(exc))
+    return redirect(f"/playlists/{playlist_id}", notice="Playlist created.")
+
+
+@router.get("/playlists/{playlist_id}", response_class=HTMLResponse)
+def playlist_page(
+    playlist_id: int,
+    request: Request,
+    session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> HTMLResponse:
+    playlist = store.get_playlist(playlist_id)
+    items = store.list_items(playlist_id)
+    players = store.players_using(playlist_id)
+    return render(
+        request,
+        "playlist.html",
+        session,
+        playlist=playlist,
+        items=items,
+        players=players,
+        media=store.list_media(),
+        empty_warning=EMPTY_ASSIGNED_WARNING if players and not items else None,
+        default_image_duration=request.app.state.coral.settings.default_image_duration_s,
+        timezone=request.app.state.coral.settings.timezone,
+    )
+
+
+@router.post("/playlists/{playlist_id}/rename")
+def rename_playlist(
+    playlist_id: int,
+    name: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        store.rename_playlist(playlist_id, name)
+    except ValueError as exc:
+        return redirect(f"/playlists/{playlist_id}", error=str(exc))
+    return redirect(f"/playlists/{playlist_id}", notice="Playlist renamed.")
+
+
+@router.post("/playlists/{playlist_id}/delete")
+def delete_playlist(
+    playlist_id: int,
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        store.delete_playlist(playlist_id)
+    except Conflict as exc:
+        return redirect(f"/playlists/{playlist_id}", error=str(exc))
+    return redirect("/playlists", notice="Playlist deleted.")
+
+
+@router.post("/playlists/{playlist_id}/items")
+def add_item(
+    playlist_id: int,
+    media_id: int = Form(...),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    image_duration_s: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        store.add_item(
+            playlist_id,
+            media_id,
+            _opt_str(start_date),
+            _opt_str(end_date),
+            _opt_int(image_duration_s),
+        )
+    except (ValueError, Conflict) as exc:
+        return redirect(f"/playlists/{playlist_id}", error=str(exc))
+    return redirect(f"/playlists/{playlist_id}", notice="Item added.")
+
+
+@router.post("/items/{item_id}/update")
+def update_item(
+    item_id: int,
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    image_duration_s: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    playlist_id = store.get_item(item_id)["playlist_id"]
+    try:
+        store.update_item(
+            item_id, _opt_str(start_date), _opt_str(end_date), _opt_int(image_duration_s)
+        )
+    except ValueError as exc:
+        return redirect(f"/playlists/{playlist_id}", error=str(exc))
+    return redirect(f"/playlists/{playlist_id}", notice="Item updated.")
+
+
+@router.post("/items/{item_id}/move")
+def move_item(
+    item_id: int,
+    position: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    playlist_id = store.get_item(item_id)["playlist_id"]
+    try:
+        new_position = _opt_int(position)
+        if new_position is None:
+            raise ValueError("Enter a position")
+        store.move_item(item_id, new_position)
+    except ValueError as exc:
+        return redirect(f"/playlists/{playlist_id}", error=str(exc))
+    return redirect(f"/playlists/{playlist_id}")
+
+
+@router.post("/items/{item_id}/remove")
+def remove_item(
+    item_id: int,
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    playlist_id = store.get_item(item_id)["playlist_id"]
+    store.remove_item(item_id)
+    if not store.list_items(playlist_id) and store.players_using(playlist_id):
+        return redirect(f"/playlists/{playlist_id}", error=EMPTY_ASSIGNED_WARNING)
+    return redirect(f"/playlists/{playlist_id}", notice="Item removed.")
+
+
+# ---------------------------------------------------------------- players
+
+
+@router.post("/players/{player_id}/assign")
+def assign_playlist(
+    player_id: int,
+    playlist_id: str = Form(""),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    try:
+        target = _opt_int(playlist_id)
+        if target is None:
+            raise ValueError("Choose a playlist")
+        store.assign_playlist(player_id, target)
+    except ValueError as exc:
+        return redirect("/players", error=str(exc))
+    notice = "Playlist assigned."
+    if not store.list_items(target):
+        notice += " " + EMPTY_ASSIGNED_WARNING
+    return redirect("/players", notice=notice)
+
+
+@router.post("/players/{player_id}/unassign")
+def unassign_playlist(
+    player_id: int,
+    clear: str = Form(...),
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    """Unassigning asks "Clear the screen too?": clear=yes is an explicit clear,
+    clear=no keeps the player's last list."""
+    if clear not in {"yes", "no"}:
+        return redirect("/players", error="Choose whether to clear the screen.")
+    store.unassign_playlist(player_id, clear=clear == "yes")
+    if clear == "yes":
+        return redirect("/players", notice="Playlist unassigned and screen cleared.")
+    return redirect("/players", notice="Playlist unassigned. The player keeps its last list.")
+
+
+@router.post("/players/{player_id}/clear")
+def clear_screen(
+    player_id: int,
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    store.set_cleared(player_id, True)
+    return redirect("/players", notice="Screen cleared. The player will show the fallback image.")
+
+
+@router.post("/players/{player_id}/resume")
+def resume_screen(
+    player_id: int,
+    _session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> Response:
+    store.set_cleared(player_id, False)
+    return redirect("/players", notice="Screen resumed.")

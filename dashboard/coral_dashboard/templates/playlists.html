@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Playlists{% endblock %}
+{% block content %}
+<h1>Playlists</h1>
+<form method="post" action="/playlists" class="card row">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>New playlist <input type="text" name="name" maxlength="100" required></label>
+  <button type="submit">Create</button>
+</form>
+<table>
+  <thead><tr><th>Name</th><th>Items</th><th>Players</th><th>Hash</th></tr></thead>
+  <tbody>
+  {% for p in playlists %}
+    <tr>
+      <td><a href="/playlists/{{ p.id }}">{{ p.name }}</a></td>
+      <td>{{ p.item_count }}</td>
+      <td>{{ p.player_count }}</td>
+      <td class="mono muted">{{ p.playlist_hash[:12] }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">No playlists yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

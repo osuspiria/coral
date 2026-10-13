@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import pytest
+from coral_dashboard.auth import hash_token
+from dash_helpers import add_media, login
+
+AUTH = {"Authorization": "Bearer tok"}
+WARNING = "This won&#39;t clear the screens. Use Clear screen if that&#39;s what you want."
+
+
+@pytest.fixture
+def admin(client):
+    csrf = login(client)
+
+    def post(path, **data):
+        return client.post(path, data={"csrf_token": csrf, **data})
+
+    return post
+
+
+def manifest(client):
+    return client.get("/api/v1/manifest", headers=AUTH).json()
+
+
+def test_pages_render(client, admin, app_store):
+    pl = app_store.create_playlist("Loja")
+    app_store.add_item(pl, add_media(app_store, 1))
+    app_store.create_player("pombal", hash_token("tok"), playlist_id=pl)
+    for path in ("/players", "/playlists", f"/playlists/{pl}", "/media"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+    assert "pombal" in client.get("/players").text
+
+
+def test_playlist_crud_flow(client, admin, app_store):
+    response = admin("/playlists", name="Loja")
+    assert response.status_code == 200
+    pl = app_store.list_playlists()[0]["id"]
+    m1, m2 = add_media(app_store, 1), add_media(app_store, 2)
+
+    admin(f"/playlists/{pl}/items", media_id=str(m1), image_duration_s="5")
+    admin(
+        f"/playlists/{pl}/items", media_id=str(m2), start_date="2026-10-01", end_date="2026-10-31"
+    )
+    items = app_store.list_items(pl)
+    assert [(i["media_id"], i["image_duration_s"]) for i in items] == [(m1, 5), (m2, None)]
+    assert items[1]["start_date"] == "2026-10-01"
+
+    admin(f"/items/{items[1]['id']}/move", position="1")
+    assert [i["media_id"] for i in app_store.list_items(pl)] == [m2, m1]
+
+    admin(
+        f"/items/{items[0]['id']}/update", start_date="", end_date="2026-12-24", image_duration_s=""
+    )
+    updated = app_store.get_item(items[0]["id"])
+    assert (updated["end_date"], updated["image_duration_s"]) == ("2026-12-24", None)
+
+    bad = admin(f"/items/{items[0]['id']}/update", start_date="2026-12-31", end_date="2026-01-01")
+    assert "must not be after" in bad.text
+
+    admin(f"/playlists/{pl}/rename", name="Shop")
+    assert app_store.get_playlist(pl)["name"] == "Shop"
+
+    admin(f"/playlists/{pl}/delete")
+    assert app_store.list_playlists() == []
+
+
+def test_empty_assigned_playlist_warns(client, admin, app_store):
+    pl = app_store.create_playlist("Loja")
+    item = app_store.add_item(pl, add_media(app_store, 1))
+    app_store.create_player("pombal", hash_token("tok"), playlist_id=pl)
+    response = admin(f"/items/{item}/remove")
+    assert WARNING in response.text
+    assert WARNING in client.get(f"/playlists/{pl}").text
+    # The manifest really is empty and not cleared: the player will refuse it.
+    body = manifest(client)
+    assert (body["items"], body["cleared"]) == ([], False)
+
+
+def test_cannot_delete_assigned_playlist_via_web(client, admin, app_store):
+    pl = app_store.create_playlist("Loja")
+    app_store.create_player("pombal", hash_token("tok"), playlist_id=pl)
+    response = admin(f"/playlists/{pl}/delete")
+    assert "Unassign it first" in response.text
+
+
+def test_assign_clear_resume_unassign(client, admin, app_store):
+    pl = app_store.create_playlist("Loja")
+    app_store.add_item(pl, add_media(app_store, 1))
+    pid = app_store.create_player("pombal", hash_token("tok"))
+    assert manifest(client)["assigned"] is False
+
+    admin(f"/players/{pid}/assign", playlist_id=str(pl))
+    assert len(manifest(client)["items"]) == 1
+
+    admin(f"/players/{pid}/clear")
+    body = manifest(client)
+    assert (body["cleared"], body["items"]) == (True, [])
+
+    admin(f"/players/{pid}/resume")
+    assert len(manifest(client)["items"]) == 1
+
+    # Unassign without clearing: player keeps its last list (not a clear).
+    admin(f"/players/{pid}/unassign", clear="no")
+    body = manifest(client)
+    assert (body["assigned"], body["cleared"]) == (False, False)
+
+    # Unassign with clearing: explicit clear.
+    admin(f"/players/{pid}/assign", playlist_id=str(pl))
+    admin(f"/players/{pid}/unassign", clear="yes")
+    body = manifest(client)
+    assert (body["assigned"], body["cleared"]) == (False, True)
+
+    # Assigning again ends the clear.
+    admin(f"/players/{pid}/assign", playlist_id=str(pl))
+    body = manifest(client)
+    assert (body["assigned"], body["cleared"], len(body["items"])) == (True, False, 1)
+
+
+def test_unassign_requires_explicit_choice(client, admin, app_store):
+    pl = app_store.create_playlist("Loja")
+    pid = app_store.create_player("pombal", hash_token("tok"), playlist_id=pl)
+    response = admin(f"/players/{pid}/unassign", clear="maybe")
+    assert "Choose whether to clear" in response.text
+    assert app_store.get_player(pid)["playlist_id"] == pl
+
+
+def test_unknown_ids_are_404(client, admin):
+    assert client.get("/playlists/999").status_code == 404
+    assert admin("/players/999/clear").status_code == 404
