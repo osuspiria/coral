@@ -1,6 +1,7 @@
 # /etc/caddy/Caddyfile — HTTPS with automatic TLS in front of the dashboard.
 # Replace the hostname. HTTP is redirected to HTTPS automatically.
 signage.example.com {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	request_body {
 		max_size 2GB
 	}

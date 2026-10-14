@@ -13,6 +13,7 @@ from .auth import SESSION_COOKIE, Session, SessionSigner, hash_token
 from .config import Settings
 from .db import connect
 from .manifest import ManifestContext
+from .ratelimit import LoginThrottle
 from .repo import Store
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -29,6 +30,7 @@ class AppState:
     sessions: SessionSigner
     login_sessions: SessionSigner
     clock: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
+    login_throttle: LoginThrottle = field(default_factory=LoginThrottle)
 
 
 def app_state(request: Request) -> AppState:

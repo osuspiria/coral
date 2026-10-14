@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -36,6 +37,7 @@ def _human_seconds(seconds: int | float | None) -> str:
 
 templates.env.filters["human_seconds"] = _human_seconds
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 def render(
@@ -100,8 +102,20 @@ def login(
     login_session = state.login_sessions.load(request.cookies.get(LOGIN_COOKIE))
     if login_session is None or not state.login_sessions.check_csrf(login_session, csrf_token):
         return redirect("/login", error="Your login form expired. Please try again.")
+    # Behind Caddy, uvicorn's --proxy-headers sets the real client address.
+    ip = request.client.host if request.client else "unknown"
+    wait = state.login_throttle.wait_seconds(ip)
+    if wait > 0:
+        log.warning("Login refused for %s: throttled for %.0f s more", ip, wait)
+        return redirect(
+            "/login", error=f"Too many failed attempts. Try again in {int(wait) + 1} seconds."
+        )
     if not verify_password(state.settings.admin_password_hash, password):
+        failures = state.login_throttle.failure(ip)
+        log.warning("Failed admin login from %s (%d in a row)", ip, failures)
         return redirect("/login", error="Wrong password.")
+    state.login_throttle.success(ip)
+    log.info("Admin login from %s", ip)
     cookie, _ = state.sessions.issue()
     response = redirect("/")
     _set_cookie(response, state, SESSION_COOKIE, cookie, state.settings.session_hours * 3600)
