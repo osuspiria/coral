@@ -799,3 +799,32 @@ def test_idle_active_with_a_current_entry_is_not_idle(scenario, monkeypatch):
         assert h.actions.calls == []
 
     scenario(body)
+
+
+def test_commit_happens_at_health_check_without_waiting_for_a_heartbeat(scenario):
+    """Seen on the Pi: the first heartbeat went out before mpv was connected, so the
+    commit waited a full heartbeat interval, close to the updater's deadline."""
+
+    async def body(h):
+        from coral_player import __version__
+
+        h.publish(1)
+        updater = h.tmp_path / "updater"
+        updater.mkdir()
+        (updater / "status.json").write_text(
+            json.dumps({"state": "pending_commit", "version": __version__, "nonce": "n"})
+        )
+        agent = await h.start()
+        agent.health.on_disconnect()  # mpv not there yet when the heartbeat goes out
+        await agent.heartbeat_once()
+        commit = h.tmp_path / "var/update/commit.json"
+        assert not commit.exists()
+        agent.health.on_connect()  # mpv comes up: the next health check commits
+        await agent.sync_once(FULL)
+        await agent.check_mpv_health()
+        agent.try_commit()
+        assert json.loads(commit.read_text())["nonce"] == "n"
+        heartbeats = len(h.server.heartbeats)
+        assert heartbeats == 1  # no second heartbeat was needed
+
+    scenario(body)

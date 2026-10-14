@@ -85,6 +85,7 @@ class Agent:
         # Tests only: the server's interval is always 30-60 s.
         self.heartbeat_interval_override = heartbeat_interval_override
         self.heartbeat_interval_s = DEFAULT_HEARTBEAT_S
+        self.heartbeat_accepted = False  # since this process started (update commit)
         self.heartbeat_backoff = Backoff(config.backoff_min_s, config.backoff_max_s)
         self._rng = random.Random()  # noqa: S311 (jitter, not security)
         self.commands = CommandExecutor(lambda: self.state, self._save, changes, self.actions)
@@ -328,6 +329,7 @@ class Agent:
                 await self.check_mpv_health()
             except Exception:
                 log.exception("Unexpected error while checking mpv health")
+            self.try_commit()
 
     # ------------------------------------------------------------ heartbeat
 
@@ -360,6 +362,7 @@ class Agent:
             self._heartbeat_failed(str(exc))
             return None
         self.heartbeat_backoff.reset()
+        self.heartbeat_accepted = True
         self.commands.acks_delivered(body["acked_commands"])
         self.heartbeat_interval_s = response.interval_s
         self.state.last_heartbeat_ok = self.now().isoformat()
@@ -372,14 +375,25 @@ class Agent:
         return response
 
     def handle_update(self, response: HeartbeatResponse) -> None:
-        """Spec 6.2: ask the updater for the desired version; confirm a healthy start
-        of this release (a heartbeat was just accepted and mpv is playing)."""
+        """Spec 6.2: ask the updater for the desired version."""
         try:
             self.update.want(response.desired_version)
-            playing = self.health.report().state == "playing"
-            self.update.maybe_commit(heartbeat_accepted=True, playing=playing)
         except OSError as exc:
             log.error("Update bookkeeping failed: %s", exc)
+        self.try_commit()
+
+    def try_commit(self) -> None:
+        """Confirm a healthy start of this release as soon as both conditions hold, in
+        any order: a heartbeat from it was accepted and mpv is playing. Called after
+        heartbeats and after every mpv health check, so the commit does not wait for
+        the next heartbeat (the updater's deadline is 3 minutes)."""
+        if self.update.committed:
+            return
+        try:
+            playing = self.health.report().state == "playing"
+            self.update.maybe_commit(heartbeat_accepted=self.heartbeat_accepted, playing=playing)
+        except OSError as exc:
+            log.error("Update commit failed: %s", exc)
 
     def _heartbeat_failed(self, message: str) -> None:
         log.error("Heartbeat failed: %s", message)
