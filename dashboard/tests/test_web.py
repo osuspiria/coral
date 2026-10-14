@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from coral_dashboard.auth import hash_token
 from dash_helpers import add_media, login
@@ -198,7 +200,26 @@ def test_releases_page_and_player_update_controls(client, admin, app_store):
     assert "player override" in detail
 
     app_store.record_update_report(pid, {"state": "rolled_back", "version": "0.3.0"})
+    app_store.record_heartbeat(
+        pid,
+        {
+            "agent_version": "0.2.0",
+            "player_time": "x",
+            "playlist_hash_applied": None,
+            "playlist_hash_seen": None,
+            "cleared": False,
+            "clock_drift": False,
+            "mpv": {"state": "playing", "current_file": None, "progressing": True, "restarts": 0},
+            "sync": {"last_ok": None, "last_error": None},
+            "system": {"disk_free_mb": None, "temp_c": None, "uptime_s": None},
+            "update": {"state": "rolled_back", "version": "0.3.0", "last_error": "no commit"},
+            "acked_commands": [],
+        },
+        datetime(2026, 10, 14, tzinfo=UTC),
+    )
     detail = client.get(f"/players/{pid}").text
+    # "update" is also a dict method: the template must read the key, not the method.
+    assert "rolled_back 0.3.0" in detail and "no commit" in detail
     assert "not offered: failed on this player" in detail and "Try again" in detail
     admin(f"/players/{pid}/clear-failed")
     assert app_store.get_player(pid)["failed_version"] is None

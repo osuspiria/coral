@@ -86,8 +86,8 @@
       <span class="muted">({% if p.desired_version %}player override{% else %}channel {{ p.channel }}{% endif %})</span>
       {% if target_version and desired_version != target_version %}<span class="badge bad">not offered: failed on this player</span>{% endif %}
     </td></tr>
-    {% if st %}<tr><th>Update state</th><td>{{ st.update.state }}{% if st.update.version %} {{ st.update.version }}{% endif %}
-      {% if st.update.last_error %}<span class="badge bad">error</span> {{ st.update.last_error }}{% endif %}</td></tr>{% endif %}
+    {% if st %}<tr><th>Update state</th><td>{{ st['update'].state }}{% if st['update'].version %} {{ st['update'].version }}{% endif %}
+      {% if st['update'].last_error %}<span class="badge bad">error</span> {{ st['update'].last_error }}{% endif %}</td></tr>{% endif %}
     {% if p.failed_version %}<tr><th>Failed version</th><td><span class="badge bad">{{ p.failed_version }}</span>
       <form method="post" action="/players/{{ p.id }}/clear-failed" class="inline"
             data-confirm="Allow {{ p.failed_version }} to be tried again on {{ p.label }}?">
