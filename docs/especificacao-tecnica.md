@@ -379,7 +379,7 @@ O player só pede o manifest quando o `playlist_hash` da resposta difere do últ
 
 Para o dia em que nem o update nem o rollback funcionem: **WireGuard** (ou túnel SSH reverso) do Pi para o VPS, SSH só por chave e apenas acessível pela interface do túnel. Fica fora do caminho normal de operação.
 
-**Implementação (fase 4).** Servidor WireGuard no VPS do dashboard (`wg0`, 10.77.0.1/16, UDP 51820). A chave privada de cada Pi é gerada no próprio Pi; `signagectl player wg-add <id> --pubkey <chave>` atribui-lhe um IP 10.77.x.y e regista o peer; revogar o player remove-o. No Pi, `AllowedIPs = 10.77.0.1/32` (só fala com o VPS) e `PersistentKeepalive = 25` (CGNAT, ~6 MB/mês). O SSH ao Pi é só por chave; com `--ssh-only-wireguard` só é aceite na interface `wg0`. Acesso: `ssh -J <vps> <utilizador>@10.77.x.y`.
+**Implementação (fase 4).** Servidor WireGuard no VPS do dashboard (`wg0`, 10.77.0.1/16, UDP 51820). A chave privada de cada Pi é gerada no próprio Pi; `signagectl player wg-add <id> --pubkey <chave>` atribui-lhe um IP 10.77.x.y e imprime os comandos a correr no VPS (`wg set` + `wg-quick save`, com sudo) e no Pi; revogar o player imprime a remoção do peer. O `signagectl` não mexe no `wg0` diretamente porque corre como o utilizador do dashboard, sem root (correr como root deixaria ficheiros da SQLite com dono errado). No Pi, `AllowedIPs = 10.77.0.1/32` (só fala com o VPS) e `PersistentKeepalive = 25` (CGNAT, ~6 MB/mês). O SSH ao Pi é só por chave; com `--ssh-only-wireguard` só é aceite na interface `wg0`. Acesso: `ssh -J <vps> <utilizador>@10.77.x.y`.
 
 ---
 

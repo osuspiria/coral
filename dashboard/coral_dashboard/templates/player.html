@@ -8,6 +8,7 @@
   <h2>Status</h2>
   {% if p.revoked %}<p class="msg error">This player is revoked; its token no longer works.</p>{% endif %}
   <table>
+    {% if p.wg_ip %}<tr><th>Emergency access</th><td class="mono">{{ p.wg_ip }}{% if not p.wg_pubkey %} (removed){% endif %}</td></tr>{% endif %}
     <tr><th>Connection</th><td>
       {% if s.online %}<span class="badge ok">online</span>{% else %}<span class="badge bad">offline</span>{% endif %}
       last heartbeat {{ s.seen_ago_s | human_seconds }}{% if s.seen_ago_s is not none %} ago{% endif %}

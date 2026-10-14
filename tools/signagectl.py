@@ -22,6 +22,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from coral_dashboard import wireguard
 from coral_dashboard.auth import hash_password, hash_token, new_player_token
 from coral_dashboard.config import load_env_file
 from coral_dashboard.db import connect, migrate
@@ -71,6 +72,53 @@ def cmd_player_revoke(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(f"Player {args.id} ({player['label']}) revoked. Its token no longer works.")
+    old_key = wireguard.unassign(store.conn, args.id)
+    if old_key:
+        print("Remove its emergency access on the VPS:")
+        for command in wireguard.vps_remove_commands(old_key):
+            print(f"  {command}")
+    return 0
+
+
+def cmd_player_wg_add(args: argparse.Namespace) -> int:
+    """Register the Pi's WireGuard public key and print the commands for both ends."""
+    endpoint = os.environ.get("CORAL_WG_ENDPOINT", "")
+    server_key = os.environ.get("CORAL_WG_SERVER_PUBKEY", "")
+    if not endpoint or not server_key:
+        print(
+            "error: set CORAL_WG_ENDPOINT (host:51820) and CORAL_WG_SERVER_PUBKEY "
+            "in the dashboard .env",
+            file=sys.stderr,
+        )
+        return 1
+    store = _store(args)
+    try:
+        player = store.get_player(args.id)
+        if player["revoked"]:
+            raise wireguard.WireGuardError("the player is revoked")
+        address = wireguard.assign(store.conn, args.id, args.pubkey)
+    except (NotFound, wireguard.WireGuardError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Player {args.id} ({player['label']}) has tunnel address {address}.")
+    print("1. On the VPS:")
+    for command in wireguard.vps_add_commands(args.pubkey.strip(), address):
+        print(f"  {command}")
+    print("2. On the Pi:")
+    print(f"  {wireguard.pi_command(address, endpoint, server_key)}")
+    print(f"Then, from your machine: ssh -J <admin>@<vps> <user>@{address}")
+    return 0
+
+
+def cmd_player_wg_remove(args: argparse.Namespace) -> int:
+    store = _store(args)
+    old_key = wireguard.unassign(store.conn, args.id)
+    if old_key is None:
+        print("error: this player has no emergency access configured", file=sys.stderr)
+        return 1
+    print("On the VPS:")
+    for command in wireguard.vps_remove_commands(old_key):
+        print(f"  {command}")
     return 0
 
 
@@ -237,6 +285,13 @@ def build_parser() -> argparse.ArgumentParser:
     revoke = player.add_parser("revoke", help="invalidate a player's token")
     revoke.add_argument("id", type=int)
     revoke.set_defaults(func=cmd_player_revoke)
+    wg_add = player.add_parser("wg-add", help="register the Pi's WireGuard key (emergency access)")
+    wg_add.add_argument("id", type=int)
+    wg_add.add_argument("--pubkey", required=True, help="output of `wg pubkey` on the Pi")
+    wg_add.set_defaults(func=cmd_player_wg_add)
+    wg_remove = player.add_parser("wg-remove", help="remove the player's emergency access")
+    wg_remove.add_argument("id", type=int)
+    wg_remove.set_defaults(func=cmd_player_wg_remove)
 
     release = sub.add_parser("release", help="player releases").add_subparsers(
         dest="action", required=True

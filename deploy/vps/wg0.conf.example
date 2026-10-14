@@ -1,0 +1,10 @@
+# /etc/wireguard/wg0.conf on the VPS (emergency access, spec 6.4). Mode 600.
+# Generate the key pair once:  wg genkey | tee /etc/wireguard/server.key | wg pubkey
+# Put the public key in the dashboard .env as CORAL_WG_SERVER_PUBKEY.
+# Peers are added with the commands printed by `signagectl player wg-add`;
+# SaveConfig keeps them across restarts.
+[Interface]
+Address = 10.77.0.1/16
+ListenPort = 51820
+PrivateKey = <contents of /etc/wireguard/server.key>
+SaveConfig = true
