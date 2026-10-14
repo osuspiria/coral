@@ -1,6 +1,6 @@
 # Instalação do player (Raspberry Pi 5)
 
-Pressupostos: Raspberry Pi OS **Lite** 64-bit já instalado e a arrancar pelo SSD, com Wi-Fi ligado ao hotspot. Os comandos correm no Pi, com teclado/ecrã ou SSH **apenas durante a instalação**. Ainda não há `install.sh` nem updater (fases 3 e 4): a instalação e as atualizações são manuais e estão aqui descritas passo a passo. A versão atual do agente é a **0.2.0** (fase 2: heartbeat e comandos remotos).
+Pressupostos: Raspberry Pi OS **Lite** 64-bit já instalado e a arrancar pelo SSD, com Wi-Fi ligado ao hotspot. Os comandos correm no Pi, com teclado/ecrã ou SSH **apenas durante a instalação**. A instalação inicial é manual e está aqui descrita passo a passo (o `install.sh` é da fase 4). A partir da **0.3.0** o player atualiza-se sozinho com releases assinadas (updater, ver `docs/releases.md`); só a primeira instalação e as mudanças de units systemd são manuais.
 
 ## 0. Confirmar a máquina (não assumir)
 
@@ -18,10 +18,11 @@ Se o Python for < 3.11, **parar** e reportar: o agente usa `tomllib` (3.11+).
 
 ```bash
 sudo apt update
-sudo apt install -y mpv polkitd
+sudo apt install -y mpv polkitd minisign
 mpv --version | head -1              # anotar a versão (IPC validado no 0.34.1 e no 0.40.0 do Pi 5)
 sudo apt install -y ffmpeg           # só para o teste de validação do passo 7 (pode remover-se depois)
 pkaction --version                   # polkit ≥ 0.106 (regras em JavaScript); o Bookworm traz o 122
+minisign -v                          # verificação das releases (spec §6)
 ```
 
 O agente não tem dependências Python externas (só a stdlib), não há `pip install`.
@@ -36,18 +37,20 @@ sudo mkdir -p /opt/signage/releases /etc/signage
 
 ## 3. Código (release)
 
-No computador de desenvolvimento, na raiz do repositório:
+Usar uma release assinada, construída no computador de desenvolvimento como em `docs/releases.md` (`dist/coral-player-<v>.tar.gz` + `.minisig`). Copiar para o Pi os dois ficheiros e a chave pública:
 
 ```bash
-V=0.2.0
-git archive --format=tar.gz -o coral-player-$V.tar.gz HEAD player deploy
-scp coral-player-$V.tar.gz <utilizador>@<ip-do-pi>:      # os ":" no fim são obrigatórios
+V=0.3.0
+scp dist/coral-player-$V.tar.gz dist/coral-player-$V.tar.gz.minisig deploy/pi/release-pubkey.pub \
+    <utilizador>@<ip-do-pi>:                              # os ":" no fim são obrigatórios
 ```
 
-No Pi:
+No Pi, verificar a assinatura **antes** de instalar e só depois extrair:
 
 ```bash
-V=0.2.0
+V=0.3.0
+sudo install -m 644 release-pubkey.pub /etc/signage/release-pubkey.pub
+minisign -V -p /etc/signage/release-pubkey.pub -m coral-player-$V.tar.gz   # "Signature and comment signature verified"
 sudo mkdir -p /opt/signage/releases/$V
 sudo tar xzf coral-player-$V.tar.gz -C /opt/signage/releases/$V
 sudo ln -sfn /opt/signage/releases/$V /opt/signage/current
@@ -78,8 +81,12 @@ sudo cp $D/journald-signage.conf /etc/systemd/journald.conf.d/signage.conf
 sudo install -m 644 $D/polkit-signage.rules /etc/polkit-1/rules.d/50-signage.rules
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/signage.conf
 sudo systemctl restart systemd-journald
+# Updater (fica fora das releases e não se atualiza a si próprio, spec §6.1):
+sudo rm -rf /opt/signage/updater && sudo mkdir -p /opt/signage/updater
+sudo cp -r /opt/signage/current/player/updater/coral_updater /opt/signage/updater/
+sudo cp $D/signage-updater.service $D/signage-updater.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now mpv.service signage-agent.service
+sudo systemctl enable --now mpv.service signage-agent.service signage-updater.timer
 ```
 
 O ecrã deve mostrar logo a imagem de fallback (azul-escuro liso). Depois do primeiro sync passa para a playlist atribuída.
@@ -96,6 +103,9 @@ sudo systemctl start mpv.service
 
 ```bash
 systemctl status mpv signage-agent
+systemctl list-timers signage-updater.timer      # próxima execução do updater
+journalctl -u signage-updater -n 20 --no-pager   # o que o updater fez
+cat /var/lib/signage-updater/status.json 2>/dev/null   # estado do último update
 journalctl -u signage-agent -f            # "Connected to mpv", "Applied manifest ...", sem "Heartbeat failed"
 journalctl -u mpv -b --no-pager | tail -30
 sudo cat /var/lib/signage/state.json      # playing, last_sync_*, last_heartbeat_*, clock_drift
@@ -136,28 +146,19 @@ sudo -u signage timeout 20 mpv --vo=gpu --gpu-context=drm \
 sudo systemctl start mpv signage-agent
 ```
 
-## 8. Atualizar um player já instalado
+## 8. Atualizações
 
-Exemplo de 0.1.x para 0.2.0. A versão anterior fica em `/opt/signage/releases/` para voltar atrás.
+**A partir da 0.3.0 são automáticas**: publicar a release no dashboard e escolher a versão no canal ou no player (`docs/releases.md`). O Pi faz o resto no minuto seguinte ao heartbeat: descarrega, verifica a assinatura, corre o selftest, troca de versão e confirma; se a versão nova não confirmar em ~3 min, volta à anterior sozinho e o dashboard mostra a versão como falhada.
 
-```bash
-V=0.2.0                                    # depois de copiar coral-player-$V.tar.gz (passo 3)
-sudo mkdir -p /opt/signage/releases/$V
-sudo tar xzf coral-player-$V.tar.gz -C /opt/signage/releases/$V
-sudo ln -sfn /opt/signage/releases/$V /opt/signage/current
-D=/opt/signage/current/deploy/pi
-sudo cp $D/mpv.service $D/signage-agent.service /etc/systemd/system/
-sudo install -m 644 $D/polkit-signage.rules /etc/polkit-1/rules.d/50-signage.rules   # novo na 0.2.0
-sudo systemctl daemon-reload && sudo systemctl restart mpv signage-agent
-journalctl -u signage-agent -n 5 --no-pager        # "signage-agent 0.2.0 starting"
-```
+**Passar um Pi de 0.2.x para 0.3.0** (uma vez, porque a 0.2.x não tem updater): instalar o minisign (passo 1), seguir o passo 3 com a release 0.3.0 e o passo 5 completo (units novos, tmpfiles, updater e timer). Os units de `mpv` e `signage-agent` não mudaram, mas convém copiá-los de novo.
 
-O `poll_interval_s` de `/etc/signage/config.toml` deixou de ter efeito na 0.2.0 (o heartbeat comanda o sync; o intervalo vem do servidor). Pode ficar no ficheiro.
+**Mudanças nos units systemd ou na regra polkit** nunca chegam pelo updater: repetir os comandos do passo 5 que lhes dizem respeito.
 
-Voltar atrás: `sudo ln -sfn /opt/signage/releases/<versão-anterior> /opt/signage/current && sudo systemctl restart mpv signage-agent`.
+**Voltar atrás à mão** (se for preciso): `sudo ln -sfn /opt/signage/releases/<versão> /opt/signage/current && sudo systemctl restart mpv signage-agent`.
 
 ## 9. Notas e limitações
 
 - Root só-leitura (overlay), partição de dados separada, watchdog de hardware, chrony e `install.sh` são da fase 4. O agente já só escreve em `/var/lib/signage` e usa escritas atómicas, por isso aguenta cortes de energia.
 - Heartbeat a cada 30–60 s (valor do servidor). O dashboard mostra o player offline ao fim de 3 heartbeats falhados. Os erros ficam também no journal e em `state.json`.
 - Sem progresso no ecrã durante mais de 2 min (ou a duração da imagem + 30 s), o agente reinicia o `mpv.service` e reporta-o.
+- O updater corre como root (precisa de escrever em `/opt/signage` e reiniciar serviços); o agente continua sem privilégios e só pede e confirma updates através de ficheiros em `/var/lib/signage/update/`. São mantidas as últimas 3 releases, mais a atual e a anterior.

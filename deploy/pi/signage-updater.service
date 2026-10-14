@@ -1,0 +1,19 @@
+# /etc/systemd/system/signage-updater.service — installs signed releases (spec 6).
+# Runs as root (it writes /opt/signage and restarts services); triggered by the timer.
+[Unit]
+Description=CORAL signage updater (signed releases, selftest, rollback)
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/opt/signage/updater
+ExecStart=/usr/bin/python3 -m coral_updater
+TimeoutStartSec=15min
+Nice=10
+ProtectSystem=strict
+# /var/lib/signage must be writable here too: the selftest (run as signage from
+# this unit) checks that the agent can write its data directory.
+ReadWritePaths=/opt/signage /var/lib/signage-updater /var/lib/signage
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

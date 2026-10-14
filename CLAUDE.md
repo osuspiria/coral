@@ -89,6 +89,13 @@ PYTHONPATH=player uv run python -m coral_player --config player/config.dev.toml
 
 # Validar o mpv real (Linux/Pi, precisa de mpv + ffmpeg)
 PYTHONPATH=player python3 player/tests/test_mpv_real.py --vo=null
+
+# Suite completa em Linux (WSL): updater, minisign e mpv reais; venv separado do Windows
+UV_PROJECT_ENVIRONMENT=.venv-linux UV_LINK_MODE=copy uv run pytest
+
+# Release assinada (no WSL, onde está a chave privada) e publicação no VPS
+python3 tools/release.py 0.3.1 --key ~/.minisign/coral-release.key
+PYTHONPATH=dashboard:tools python -m signagectl release add coral-player-0.3.1.tar.gz coral-player-0.3.1.tar.gz.minisig
 ```
 
-Instalação: `docs/instalacao-vps.md` e `docs/instalacao-pi.md`. Releases assinadas: fase 3.
+Instalação: `docs/instalacao-vps.md` e `docs/instalacao-pi.md`. Releases, chaves e canais: `docs/releases.md`.

@@ -1,0 +1,13 @@
+# /etc/systemd/system/signage-updater.timer — one updater tick per minute; the
+# first one soon after boot, so a pending update is checked (and rolled back) even
+# if the agent never starts.
+[Unit]
+Description=CORAL signage updater tick
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
