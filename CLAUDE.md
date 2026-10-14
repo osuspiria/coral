@@ -67,7 +67,7 @@ A especificação completa está em `docs/especificacao-tecnica.md` (v1.2). É a
 | 3 | Updater assinado, selftest, rollback, canais |
 | 4 | Alertas, backups, hardening, provisionamento, acesso de emergência (WireGuard) |
 
-**Fase atual: 2 — aceite em 13/10/2026** (fase 1 também aceite a 13/10/2026; registos na spec §10.3). A fase 3 começa quando for planeada. Não avances para a fase seguinte sem o critério de aceitação da atual cumprido (spec §10.3).
+**Fase atual: 3 — aceite em 14/10/2026** (fases 1 e 2 aceites a 13/10/2026; registos na spec §10.3). A fase 4 começa quando for planeada. Não avances para a fase seguinte sem o critério de aceitação da atual cumprido (spec §10.3).
 
 ## Comandos úteis
 

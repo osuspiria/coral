@@ -488,6 +488,17 @@ Problemas encontrados no ecrã real e corrigidos durante a aceitação: o fallba
 
 Nota: com a playlist vazia no servidor, o `sync-now` não repara a cache, porque o manifest vazio é recusado e nada é alterado (invariante 2).
 
+**Fase 3 — aceite em 14/10/2026**, no mesmo Pi 5 (`p0`), com updater 1.0.0, minisign 0.12 no Pi (0.11 na máquina de desenvolvimento) e a chave de releases `41374DB0EA2A4B3B`:
+
+| Verificação | Resultado |
+|---|---|
+| Passagem manual 0.2.0 → 0.3.0 com assinatura verificada antes de instalar | OK |
+| Update bom 0.3.0 → 0.3.2 pedido no dashboard: descarga, assinatura, selftest, troca e confirmação sem intervenção | OK (critério da fase) |
+| Update mau 0.3.3 (`--test-broken`, o agente sai ao arrancar): instalado, sem confirmação, **rollback automático** para 0.3.2; `failed_version` = 0.3.3 e o servidor deixa de a oferecer | OK (critério da fase) |
+| Assinatura válida mas tarball alterado no servidor, assinatura de outra versão, chave errada | OK nos testes automáticos com o minisign real (WSL) |
+
+Problemas encontrados no Pi e corrigidos: o estado do update não aparecia na página do player (template); um ciclo de recargas do mpv "idle" a cada 10 s sem ser reportado (passou a exigir confirmação e a reiniciar o mpv ao fim de 3 recargas, 0.3.2); a confirmação de um update só era tentada no heartbeat e chegou a ~2 min do prazo de 3 min (passou a ser tentada também a cada verificação do mpv, 0.3.4).
+
 ---
 
 ## 11. Decisões e Pressupostos
