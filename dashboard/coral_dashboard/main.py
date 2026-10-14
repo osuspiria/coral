@@ -8,18 +8,20 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import api, media, web
+from . import alerts, api, media, web
 from .auth import SessionSigner
 from .config import Settings, load_env_file, settings_from_env
 from .db import connect, migrate
 from .deps import AppState, LoginRequired
 from .manifest import ManifestContext
+from .notify import Notifier
 from .repo import NotFound, Store
 
 log = logging.getLogger(__name__)
@@ -67,6 +69,30 @@ async def _gc_loop(settings: Settings, ctx: ManifestContext) -> None:
         await asyncio.sleep(24 * 3600)
 
 
+ALERT_CYCLE_S = 60
+
+
+def _alert_cycle(settings: Settings, ctx: ManifestContext, notifier: Notifier) -> None:
+    conn = connect(settings.db_path)
+    try:
+        alerts.run_cycle(Store(conn, ctx), settings, notifier, datetime.now(UTC))
+    finally:
+        conn.close()
+
+
+async def _alert_loop(settings: Settings, ctx: ManifestContext) -> None:
+    """Spec 3.4: evaluate alert rules every minute (one worker, so no duplicates)."""
+    notifier = Notifier(settings.ntfy_url, settings.ntfy_token)
+    if not notifier.configured:
+        log.warning("CORAL_NTFY_URL is not set: alerts are recorded but not notified")
+    while True:
+        try:
+            await asyncio.to_thread(_alert_cycle, settings, ctx, notifier)
+        except Exception:
+            log.exception("Alert cycle failed")
+        await asyncio.sleep(ALERT_CYCLE_S)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         load_env_file(Path(".env"))
@@ -76,9 +102,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        task = asyncio.create_task(_gc_loop(settings, ctx))
+        tasks = [
+            asyncio.create_task(_gc_loop(settings, ctx)),
+            asyncio.create_task(_alert_loop(settings, ctx)),
+        ]
         yield
-        task.cancel()
+        for task in tasks:
+            task.cancel()
 
     app = FastAPI(title="CORAL", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.coral = AppState(

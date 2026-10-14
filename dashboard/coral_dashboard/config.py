@@ -50,6 +50,14 @@ class Settings:
     media_grace_days: int = 7
     session_hours: int = 12
     heartbeat_interval_s: int = 60
+    ntfy_url: str = ""
+    ntfy_token: str = ""
+    healthcheck_url: str = ""
+    alert_offline_min: int = 10
+    alert_sync_failing_min: int = 30
+    alert_disk_min_mb: int = 2048
+    alert_temp_max_c: float = 80.0
+    alert_clock_skew_s: int = 120
     ffprobe_path: str = "ffprobe"
     profile: VideoProfile = field(default_factory=VideoProfile)
 
@@ -108,6 +116,14 @@ def settings_from_env(env: dict[str, str] | None = None) -> Settings:
         ffprobe_path=env.get("CORAL_FFPROBE", "ffprobe"),
         # Spec 5.1: heartbeat every 30-60 s.
         heartbeat_interval_s=min(60, max(30, int(env.get("CORAL_HEARTBEAT_INTERVAL_S", "60")))),
+        ntfy_url=env.get("CORAL_NTFY_URL", ""),
+        ntfy_token=env.get("CORAL_NTFY_TOKEN", ""),
+        healthcheck_url=env.get("CORAL_HEALTHCHECK_URL", ""),
+        alert_offline_min=int(env.get("CORAL_ALERT_OFFLINE_MIN", "10")),
+        alert_sync_failing_min=int(env.get("CORAL_ALERT_SYNC_FAILING_MIN", "30")),
+        alert_disk_min_mb=int(env.get("CORAL_ALERT_DISK_MIN_MB", "2048")),
+        alert_temp_max_c=float(env.get("CORAL_ALERT_TEMP_MAX_C", "80")),
+        alert_clock_skew_s=int(env.get("CORAL_ALERT_CLOCK_SKEW_S", "120")),
         profile=profile,
     )
     settings.validate()

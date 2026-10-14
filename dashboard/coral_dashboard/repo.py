@@ -315,6 +315,7 @@ class Store:
     def revoke_player(self, player_id: int) -> None:
         self.get_player(player_id)
         self.conn.execute("UPDATE players SET revoked = 1 WHERE id = ?", (player_id,))
+        self.resolve_all_alerts(player_id, datetime.now(UTC))
 
     def assign_playlist(self, player_id: int, playlist_id: int) -> None:
         """Assign a playlist. Assigning always ends an explicit clear."""
@@ -369,9 +370,71 @@ class Store:
     # ---------------------------------------------------- heartbeat, commands
 
     def record_heartbeat(self, player_id: int, state: dict[str, Any], now: datetime) -> None:
+        mpv = state.get("mpv") or {}
+        bad = mpv.get("state") != "playing" and not state.get("cleared")
         self.conn.execute(
-            "UPDATE players SET last_seen = ?, last_state = ? WHERE id = ?",
-            (_iso(now), json.dumps(state, sort_keys=True), player_id),
+            "UPDATE players SET last_seen = ?, last_state = ?,"
+            " mpv_bad_streak = CASE WHEN ? THEN mpv_bad_streak + 1 ELSE 0 END WHERE id = ?",
+            (_iso(now), json.dumps(state, sort_keys=True), bad, player_id),
+        )
+
+    # --------------------------------------------------------------- alerts
+
+    def open_alerts(self, player_id: int) -> dict[str, sqlite3.Row]:
+        rows = self.conn.execute(
+            "SELECT * FROM alerts WHERE player_id = ? AND resolved_at IS NULL", (player_id,)
+        ).fetchall()
+        return {r["kind"]: r for r in rows}
+
+    def open_alert(self, player_id: int, kind: str, detail: str, now: datetime) -> int | None:
+        try:
+            cur = self.conn.execute(
+                "INSERT INTO alerts (player_id, kind, detail, opened_at) VALUES (?, ?, ?, ?)",
+                (player_id, kind, detail[:500], _iso(now)),
+            )
+        except sqlite3.IntegrityError:
+            return None  # already open (unique index): no duplicates
+        return int(cur.lastrowid)
+
+    def resolve_alert(self, alert_id: int, now: datetime) -> None:
+        self.conn.execute(
+            "UPDATE alerts SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL",
+            (_iso(now), alert_id),
+        )
+
+    def resolve_all_alerts(self, player_id: int, now: datetime) -> None:
+        self.conn.execute(
+            "UPDATE alerts SET resolved_at = ? WHERE player_id = ? AND resolved_at IS NULL",
+            (_iso(now), player_id),
+        )
+
+    def list_alerts(self, *, open_only: bool = False, limit: int = 100) -> list[sqlite3.Row]:
+        where = "WHERE a.resolved_at IS NULL" if open_only else ""
+        return self.conn.execute(
+            "SELECT a.*, p.label FROM alerts a JOIN players p ON p.id = a.player_id "  # noqa: S608
+            f"{where} ORDER BY a.resolved_at IS NOT NULL, a.opened_at DESC, a.id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    def count_open_alerts(self) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM alerts WHERE resolved_at IS NULL"
+        ).fetchone()[0]
+
+    def alerts_to_notify(self) -> list[sqlite3.Row]:
+        """Openings not notified yet, then resolutions of notified alerts."""
+        return self.conn.execute(
+            "SELECT a.*, p.label, p.location FROM alerts a JOIN players p ON p.id = a.player_id"
+            " WHERE a.notified_at IS NULL"
+            " OR (a.resolved_at IS NOT NULL AND a.resolve_notified_at IS NULL)"
+            " ORDER BY a.id"
+        ).fetchall()
+
+    def mark_alert_notified(self, alert_id: int, now: datetime, *, resolution: bool) -> None:
+        column = "resolve_notified_at" if resolution else "notified_at"
+        self.conn.execute(
+            f"UPDATE alerts SET {column} = ? WHERE id = ?",  # noqa: S608 (fixed column)
+            (_iso(now), alert_id),
         )
 
     def queue_command(self, player_id: int, name: str, now: datetime | None = None) -> int:

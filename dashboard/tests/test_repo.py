@@ -9,8 +9,12 @@ from dash_helpers import CTX, add_media
 
 def test_migrate_is_idempotent(tmp_path):
     conn = connect(tmp_path / "db.sqlite3")
-    assert migrate(conn) == 3
-    assert migrate(conn) == 3
+    from importlib import resources
+
+    migrations = resources.files("coral_dashboard.migrations").iterdir()
+    latest = len([f for f in migrations if f.name.endswith(".sql")])
+    assert migrate(conn) == latest
+    assert migrate(conn) == latest
     assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
 
