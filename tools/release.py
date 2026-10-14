@@ -171,9 +171,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         if (args.out / f"coral-player-{args.version}.tar.gz").exists():
             raise ReleaseError(f"dist already has release {args.version}")
+        if not sys.stdin.isatty():
+            raise ReleaseError(
+                "run this in an interactive terminal: minisign asks for the key password"
+            )
         tarball = build_tarball(ROOT, args.version, args.out, broken=args.test_broken)
-        signature = sign(tarball, args.key, args.version)
-    except (ReleaseError, subprocess.CalledProcessError) as exc:
+        try:
+            signature = sign(tarball, args.key, args.version)
+        except subprocess.CalledProcessError:
+            # Never leave an unsigned tarball behind: it would block a retry and
+            # could be mistaken for a release.
+            tarball.unlink(missing_ok=True)
+            tarball.with_name(tarball.name + ".minisig").unlink(missing_ok=True)
+            raise ReleaseError("signing failed (wrong password?); nothing was produced") from None
+    except ReleaseError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     digest = hashlib.sha256(tarball.read_bytes()).hexdigest()

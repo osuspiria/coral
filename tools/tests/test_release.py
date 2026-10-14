@@ -104,3 +104,37 @@ def test_release_add_rejects_bad_names_and_content(data_dir, tmp_path):
     assert run(data_dir, "release", "add", str(renamed), str(sig)) == 1
     tarball.write_bytes(b"not gzip")
     assert run(data_dir, "release", "add", str(tarball), str(sig)) == 1
+
+
+def test_failed_signing_leaves_nothing(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(release, "ROOT", release.ROOT)
+    monkeypatch.setattr(release.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(release, "repo_version", lambda root: "7.7.7")
+    monkeypatch.setattr(
+        release,
+        "_git",
+        lambda *a, **k: (
+            b""
+            if a[0] == "status"
+            else release.subprocess.run(
+                ["git", *a], cwd=k["cwd"], check=True, capture_output=True
+            ).stdout
+        ),
+    )
+
+    def failing_sign(tarball, key, version):
+        raise release.subprocess.CalledProcessError(2, ["minisign"])
+
+    monkeypatch.setattr(release, "sign", failing_sign)
+    out = tmp_path / "dist"
+    assert release.main(["7.7.7", "--key", "k", "--out", str(out)]) == 1
+    assert "signing failed" in capsys.readouterr().err
+    assert list(out.iterdir()) == []
+
+
+def test_refuses_without_terminal(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(release.sys.stdin, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(release, "repo_version", lambda root: "7.7.7")
+    monkeypatch.setattr(release, "_git", lambda *a, **k: b"")
+    assert release.main(["7.7.7", "--key", "k", "--out", str(tmp_path)]) == 1
+    assert "interactive terminal" in capsys.readouterr().err
