@@ -91,7 +91,7 @@ async def validate(workdir: Path, vo: str = "null") -> list[str]:
             f"--vo={vo}",
             "--ao=null",
             "--loop-playlist=inf",
-            "--image-display-duration=2",
+            "--image-display-duration=5",  # global; the list uses 1 s per file
             "--no-terminal",
             f"--input-ipc-server={sock}",
             str(fallback),
@@ -173,7 +173,7 @@ async def validate(workdir: Path, vo: str = "null") -> list[str]:
 
         await wait_for(on_video, 5)
         shown = time.monotonic() - t0
-        assert shown < 1.9, f"image shown {shown:.2f}s (per-file option ignored?)"
+        assert shown < 3.5, f"image shown {shown:.2f}s (per-file option ignored?)"
 
         async def looped():
             return await current() == "ic.png"

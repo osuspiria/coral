@@ -155,6 +155,8 @@ class FakeMpv:
             if self.current_entry is None or self.time_pos is None:
                 raise Unavailable("property unavailable")
             return self.time_pos
+        if name == "mpv-version":
+            return "mpv fake"
         if name == "idle-active":
             return self.current_entry is None
         if name == "path":

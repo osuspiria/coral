@@ -40,14 +40,7 @@ def run_with_mpv(tmp_path, mutate=None):
     return asyncio.run(scenario())
 
 
-def test_selftest_passes(tmp_path, monkeypatch):
-    # The fake mpv does not know "mpv-version"; answer it like a real mpv would.
-    original = FakeMpv._property
-
-    def prop(self, name):
-        return "mpv 0.40.0" if name == "mpv-version" else original(self, name)
-
-    monkeypatch.setattr(FakeMpv, "_property", prop)
+def test_selftest_passes(tmp_path):
     ok, lines = run_with_mpv(tmp_path)
     assert ok, lines
     assert lines[-1].startswith("selftest passed")
