@@ -14,3 +14,4 @@ player/config.dev.toml
 /dist/
 *.minisig
 *.key
+.venv-linux/

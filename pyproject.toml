@@ -23,8 +23,8 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["dashboard", "player", "tools", "dashboard/tests", "player/tests"]
-testpaths = ["dashboard/tests", "player/tests", "tools/tests"]
+pythonpath = ["dashboard", "player", "player/updater", "tools", "dashboard/tests", "player/tests"]
+testpaths = ["dashboard/tests", "player/tests", "player/updater/tests", "tools/tests"]
 addopts = "-ra --import-mode=importlib"
 
 [tool.ruff]
