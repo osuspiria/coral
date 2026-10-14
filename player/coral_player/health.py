@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 MIN_STALL_S = 120.0
 STALL_MARGIN_S = 30.0
+IDLE_CONFIRMATIONS = 2  # consecutive idle checks before acting
+MAX_IDLE_RELOADS = 3  # reloads of an idle mpv before restarting it
 
 
 @dataclass
@@ -43,6 +45,8 @@ class MpvHealth:
         self.current_file: str | None = None
         self._last_pos: float | None = None
         self._last_progress = monotonic()
+        self.idle_checks = 0  # consecutive checks that found mpv idle
+        self.idle_reloads = 0  # reloads since mpv was last seen not idle
 
     def _progress(self) -> None:
         self._last_progress = self._monotonic()
@@ -62,6 +66,11 @@ class MpvHealth:
 
     def observe(self, time_pos: float | None, current_file: str | None, idle: bool) -> None:
         self.idle = idle
+        if idle:
+            self.idle_checks += 1
+        else:
+            self.idle_checks = 0
+            self.idle_reloads = 0
         if current_file != self.current_file:
             self.current_file = current_file
             self._progress()
@@ -80,7 +89,22 @@ class MpvHealth:
         limit = max(MIN_STALL_S, (image_duration_s or 0) + STALL_MARGIN_S)
         return self.seconds_without_progress() > limit
 
+    def idle_action(self) -> str | None:
+        """What to do about an idle mpv: None (not idle or not confirmed yet),
+        "reload" the play list, or "restart" mpv after reloads did not help."""
+        if not self.idle or self.idle_checks < IDLE_CONFIRMATIONS:
+            return None
+        if self.idle_reloads >= MAX_IDLE_RELOADS:
+            return "restart"
+        return "reload"
+
+    def mark_reloaded(self) -> None:
+        self.idle_reloads += 1
+        self.idle_checks = 0
+
     def mark_restarted(self) -> None:
+        self.idle_checks = 0
+        self.idle_reloads = 0
         self.restarts += 1
         self.stuck = True
         self._last_progress = self._monotonic()  # give the new mpv time to come up

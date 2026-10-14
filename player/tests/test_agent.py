@@ -535,6 +535,8 @@ def test_idle_mpv_gets_the_list_again(scenario):
         h.mpv.playlist.clear()
         h.mpv.current = None  # mpv went idle (e.g. the playlist was cleared by hand)
         await agent.check_mpv_health()
+        assert (await h.playlist()) == []  # one idle reading is not enough
+        await agent.check_mpv_health()
         assert (await h.playlist()) == [h.file(1)]
         assert h.actions.calls == []
 
@@ -748,5 +750,52 @@ def test_no_commit_while_mpv_is_not_playing(scenario):
         agent.health.on_disconnect()
         await agent.heartbeat_once()
         assert not (h.tmp_path / "var/update/commit.json").exists()
+
+    scenario(body)
+
+
+def test_persistently_idle_mpv_is_restarted_not_reloaded_forever(scenario):
+    """Seen on the Pi: the agent kept reloading an "idle" mpv every 10 s for minutes,
+    restarting the video each time, without reporting it."""
+
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        reloads = 0
+        for _ in range(12):
+            h.mpv.playlist.clear()
+            h.mpv.current = None  # idle again right after every reload
+            before = len(h.mpv.commands)
+            await agent.check_mpv_health()
+            await h.settle()
+            if any("loadfile" in str(c) for c in h.mpv.commands[before:]):
+                reloads += 1
+            if h.actions.calls:
+                break
+        assert reloads == 3
+        assert h.actions.calls == ["restart_mpv"]
+        report = agent.health.report()
+        assert (report.state, report.restarts) == ("stuck", 1)
+
+    scenario(body)
+
+
+def test_idle_active_with_a_current_entry_is_not_idle(scenario, monkeypatch):
+    async def body(h):
+        h.publish(1)
+        agent = await h.start()
+        await agent.sync_once(FULL)
+        original = FakeMpv._property
+
+        def contradictory(self, name):
+            return True if name == "idle-active" else original(self, name)
+
+        monkeypatch.setattr(FakeMpv, "_property", contradictory)
+        before = len(h.mpv.commands)
+        for _ in range(4):
+            await agent.check_mpv_health()
+        assert not any("loadfile" in str(c) for c in h.mpv.commands[before:])
+        assert h.actions.calls == []
 
     scenario(body)

@@ -31,7 +31,7 @@ from .clock import ClockGuard
 from .commands import CommandExecutor
 from .config import Config
 from .fsutil import atomic_write_json, read_json
-from .health import MpvHealth
+from .health import MAX_IDLE_RELOADS, MpvHealth
 from .manifest import Action, EmptyManifest, InvalidManifest, Manifest, parse_manifest
 from .mpv_controller import MpvController
 from .mpv_ipc import MpvError, MpvIpc
@@ -282,12 +282,36 @@ class Agent:
             return
         time_pos = await self._optional_property("time-pos")
         path = await self._optional_property("path")
-        idle = bool(await self._optional_property("idle-active"))
+        idle_active = await self._optional_property("idle-active")
+        idle = False
+        if idle_active is True:
+            # Cross-check: an idle mpv has no current playlist entry.
+            playlist = await self._optional_property("playlist")
+            entries = playlist if isinstance(playlist, list) else []
+            idle = not any(isinstance(e, dict) and e.get("current") for e in entries)
+            log.info(
+                "mpv reports idle-active=%r (time-pos=%r, path=%r, current entry=%s)",
+                idle_active,
+                time_pos,
+                path,
+                not idle,
+            )
         self.health.observe(time_pos, Path(path).name if path else None, idle)
-        if idle:
-            log.warning("mpv is idle; reloading the play list")
+        action = self.health.idle_action()
+        if action == "reload":
+            self.health.mark_reloaded()
+            log.warning(
+                "mpv is idle; reloading the play list (attempt %d of %d)",
+                self.health.idle_reloads,
+                MAX_IDLE_RELOADS,
+            )
             self.controller.reset()
             await self._push()
+        elif action == "restart":
+            log.error("mpv stays idle after %d reloads; restarting mpv.service", MAX_IDLE_RELOADS)
+            self.health.mark_restarted()
+            if not await self.actions.restart_mpv():
+                log.error("Could not restart mpv.service (check the polkit rule)")
         elif self.health.is_stalled(self._current_image_duration()):
             log.error(
                 "mpv shows no progress for %.0f s; restarting mpv.service",
