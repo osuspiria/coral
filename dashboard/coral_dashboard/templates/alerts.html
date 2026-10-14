@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<h1>Alerts</h1>
+<p class="muted">Evaluated every minute. Openings and resolutions are sent to ntfy{% if not ntfy_configured %} — <strong>not configured</strong> (set <code>CORAL_NTFY_URL</code>){% endif %}. See <code>docs/runbook.md</code> for what to do with each alert.</p>
+
+<h2>Open</h2>
+<table>
+  <thead><tr><th>Player</th><th>Alert</th><th>Detail</th><th>Since</th><th>Notified</th></tr></thead>
+  <tbody>
+  {% for a in open_alerts %}
+    <tr>
+      <td><a href="/players/{{ a.player_id }}">{{ a.label }}</a></td>
+      <td><span class="badge bad">{{ titles.get(a.kind, a.kind) }}</span></td>
+      <td>{{ a.detail }}</td>
+      <td class="mono">{{ a.opened_at }}</td>
+      <td>{% if a.notified_at %}yes{% else %}<span class="badge warn">pending</span>{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No open alerts.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Recently resolved</h2>
+<table>
+  <thead><tr><th>Player</th><th>Alert</th><th>Detail</th><th>Opened</th><th>Resolved</th></tr></thead>
+  <tbody>
+  {% for a in resolved %}
+    <tr>
+      <td><a href="/players/{{ a.player_id }}">{{ a.label }}</a></td>
+      <td>{{ titles.get(a.kind, a.kind) }}</td>
+      <td>{{ a.detail }}</td>
+      <td class="mono">{{ a.opened_at }}</td>
+      <td class="mono">{{ a.resolved_at }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">Nothing yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

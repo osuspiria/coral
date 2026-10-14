@@ -12,7 +12,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 
 from . import media
+from .alerts import TITLES
 from .auth import LOGIN_COOKIE, SESSION_COOKIE, Session, verify_password
+from .db import connect
 from .deps import AppState, app_state, get_store, require_admin
 from .repo import CHANNELS, COMMANDS, Conflict, NotFound, Store
 
@@ -45,6 +47,12 @@ def render(
 ) -> HTMLResponse:
     state: AppState = request.app.state.coral
     csrf = state.sessions.csrf_token(session) if session else ""
+    if session is not None and "open_alert_count" not in context:
+        conn = connect(state.settings.db_path)
+        try:
+            context["open_alert_count"] = Store(conn, state.ctx).count_open_alerts()
+        finally:
+            conn.close()
     context.setdefault("notice", request.query_params.get("notice"))
     context.setdefault("error", request.query_params.get("error"))
     return templates.TemplateResponse(
@@ -122,7 +130,11 @@ def players_page(
     state: AppState = request.app.state.coral
     now = state.clock()
     rows = [
-        (p, store.player_status(p, now, state.settings.heartbeat_interval_s))
+        (
+            p,
+            store.player_status(p, now, state.settings.heartbeat_interval_s),
+            sorted(store.open_alerts(p["id"])),
+        )
         for p in store.list_players()
     ]
     return render(request, "players.html", session, rows=rows, playlists=store.list_playlists())
@@ -523,3 +535,24 @@ def clear_failed_version(
 ) -> Response:
     store.clear_failed_version(player_id)
     return redirect(f"/players/{player_id}", notice="The failed version may be tried again.")
+
+
+# ----------------------------------------------------------------- alerts
+
+
+@router.get("/alerts", response_class=HTMLResponse)
+def alerts_page(
+    request: Request,
+    session: Session = Depends(require_admin),
+    store: Store = Depends(get_store),
+) -> HTMLResponse:
+    all_alerts = store.list_alerts(limit=200)
+    return render(
+        request,
+        "alerts.html",
+        session,
+        open_alerts=[a for a in all_alerts if a["resolved_at"] is None],
+        resolved=[a for a in all_alerts if a["resolved_at"] is not None][:50],
+        titles=TITLES,
+        ntfy_configured=bool(request.app.state.coral.settings.ntfy_url),
+    )

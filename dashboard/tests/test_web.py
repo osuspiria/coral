@@ -226,3 +226,18 @@ def test_releases_page_and_player_update_controls(client, admin, app_store):
 
     admin(f"/players/{pid}/version", version="")
     assert app_store.get_player(pid)["desired_version"] is None
+
+
+def test_alerts_page_and_navigation_counter(client, admin, app_store):
+    pid = app_store.create_player("pombal", hash_token("tok"))
+    now = datetime(2026, 10, 14, tzinfo=UTC)
+    page = client.get("/alerts").text
+    assert "No open alerts" in page and "not configured" in page
+    app_store.open_alert(pid, "disk_low", "100 MB free", now)
+    second = app_store.open_alert(pid, "temp_high", "85 C", now)
+    app_store.resolve_alert(second, now)
+    page = client.get("/alerts").text
+    assert "disk almost full" in page and "100 MB free" in page
+    assert "Recently resolved" in page and "temperature high" in page
+    assert 'class="badge bad">1</span>' in client.get("/players").text  # nav counter
+    assert "alert: disk_low" in client.get("/players").text

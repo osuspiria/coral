@@ -6,7 +6,7 @@
 <table>
   <thead><tr><th>ID</th><th>Label</th><th>Status</th><th>Playlist</th><th>Screen</th><th>Version</th><th>Disk / temp / uptime</th></tr></thead>
   <tbody>
-  {% for p, s in rows %}
+  {% for p, s, open_kinds in rows %}
     {% set st = s.state %}
     <tr>
       <td>{{ p.id }}</td>
@@ -28,6 +28,7 @@
           {% if st.clock_drift %}<span class="badge bad">clock drift</span>{% endif %}
           {% if st.sync.last_error %}<span class="badge bad" title="{{ st.sync.last_error }}">sync error</span>{% endif %}
         {% endif %}
+        {% for kind in open_kinds %}<a href="/alerts" class="badge bad">alert: {{ kind }}</a> {% endfor %}
       </td>
       <td>{{ st.agent_version if st else "—" }}</td>
       <td>

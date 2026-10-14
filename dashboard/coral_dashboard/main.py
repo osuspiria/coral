@@ -21,7 +21,7 @@ from .config import Settings, load_env_file, settings_from_env
 from .db import connect, migrate
 from .deps import AppState, LoginRequired
 from .manifest import ManifestContext
-from .notify import Notifier
+from .notify import Notifier, ping_healthcheck
 from .repo import NotFound, Store
 
 log = logging.getLogger(__name__)
@@ -93,6 +93,17 @@ async def _alert_loop(settings: Settings, ctx: ManifestContext) -> None:
         await asyncio.sleep(ALERT_CYCLE_S)
 
 
+HEALTHCHECK_PING_S = 60
+
+
+async def _healthcheck_loop(url: str) -> None:
+    """Spec 3.4: an external service (healthchecks.io) warns if these pings stop,
+    i.e. if the VPS or the dashboard dies."""
+    while True:
+        await asyncio.to_thread(ping_healthcheck, url)
+        await asyncio.sleep(HEALTHCHECK_PING_S)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         load_env_file(Path(".env"))
@@ -106,6 +117,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             asyncio.create_task(_gc_loop(settings, ctx)),
             asyncio.create_task(_alert_loop(settings, ctx)),
         ]
+        if settings.healthcheck_url:
+            tasks.append(asyncio.create_task(_healthcheck_loop(settings.healthcheck_url)))
         yield
         for task in tasks:
             task.cancel()
