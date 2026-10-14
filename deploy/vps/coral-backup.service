@@ -1,0 +1,12 @@
+# /etc/systemd/system/coral-backup.service — daily restic backup (spec 3.5).
+[Unit]
+Description=CORAL dashboard backup (restic to the Storage Box)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/coral/deploy/vps/backup.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h

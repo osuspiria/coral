@@ -5,6 +5,8 @@ Run on the dashboard host, with the same environment (.env) as the dashboard:
     signagectl player add --label pombal [--location "Loja X"] [--playlist 3]
     signagectl player revoke 7
     signagectl release add coral-player-0.3.0.tar.gz coral-player-0.3.0.tar.gz.minisig
+    signagectl backup snapshot --out /var/lib/coral/backup/coral.sqlite3
+    signagectl verify-data --data-dir /tmp/restore/var/lib/coral
     signagectl admin hash-password
 """
 
@@ -16,6 +18,7 @@ import hashlib
 import os
 import re
 import shutil
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -123,6 +126,87 @@ def cmd_release_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backup_snapshot(args: argparse.Namespace) -> int:
+    """Consistent copy of the live database (SQLite online backup API), for restic."""
+    source = _data_dir(args) / "coral.sqlite3"
+    if not source.is_file():
+        print(f"error: {source} not found", file=sys.stderr)
+        return 1
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.unlink(missing_ok=True)
+    src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+    dst = sqlite3.connect(tmp)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    os.replace(tmp, out)
+    print(f"Snapshot written to {out}")
+    return 0
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        while chunk := fh.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def cmd_verify_data(args: argparse.Namespace) -> int:
+    """Check a data directory (e.g. a restored backup): database integrity and that
+    every file the database needs exists with the right size and sha256."""
+    data_dir = Path(args.verify_dir).resolve()
+    db = data_dir / "coral.sqlite3"
+    problems: list[str] = []
+    if not db.is_file():
+        print(f"FAIL database {db} not found")
+        return 1
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    try:
+        result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        if result != "ok":
+            problems.append(f"database integrity: {result}")
+        media = conn.execute(
+            "SELECT m.* FROM media m WHERE m.deleted_at IS NULL OR EXISTS"
+            " (SELECT 1 FROM playlist_items pi WHERE pi.media_id = m.id)"
+        ).fetchall()
+        releases = conn.execute("SELECT * FROM releases").fetchall()
+        counts = {
+            t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]  # noqa: S608
+            for t in ("players", "playlists", "playlist_items", "media", "releases")
+        }
+    except sqlite3.DatabaseError as exc:
+        print(f"FAIL database unreadable: {exc}")
+        return 1
+    finally:
+        conn.close()
+    checks = [(data_dir / "media" / m["stored_name"], m["size"], m["sha256"]) for m in media]
+    checks += [
+        (data_dir / "releases" / f"coral-player-{r['version']}.tar.gz", r["size"], r["sha256"])
+        for r in releases
+    ]
+    for path, size, sha in checks:
+        if not path.is_file():
+            problems.append(f"missing {path.relative_to(data_dir)}")
+        elif path.stat().st_size != size:
+            problems.append(f"wrong size {path.relative_to(data_dir)}")
+        elif _file_sha256(path) != sha:
+            problems.append(f"sha256 mismatch {path.relative_to(data_dir)}")
+    print("Rows: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    print(f"Files checked: {len(checks)}")
+    for problem in problems:
+        print(f"FAIL {problem}")
+    if problems:
+        return 1
+    print("OK   data directory is complete and consistent")
+    return 0
+
+
 def cmd_admin_hash_password(_args: argparse.Namespace) -> int:
     password = getpass.getpass("New admin password: ")
     if len(password) < 12:
@@ -161,6 +245,14 @@ def build_parser() -> argparse.ArgumentParser:
     radd.add_argument("tarball")
     radd.add_argument("signature")
     radd.set_defaults(func=cmd_release_add)
+
+    backup = sub.add_parser("backup", help="backups").add_subparsers(dest="action", required=True)
+    snap = backup.add_parser("snapshot", help="consistent copy of the database for restic")
+    snap.add_argument("--out", required=True)
+    snap.set_defaults(func=cmd_backup_snapshot)
+    verify = sub.add_parser("verify-data", help="check a (restored) data directory")
+    verify.add_argument("--data-dir", dest="verify_dir", required=True)
+    verify.set_defaults(func=cmd_verify_data)
 
     admin = sub.add_parser("admin", help="admin account").add_subparsers(
         dest="action", required=True
