@@ -170,12 +170,31 @@ Notificação (webhook genérico: ntfy, Telegram ou email) quando:
 Cada alerta tem abertura e resolução (notifica também a recuperação), com deduplicação.
 **Vigilância do próprio dashboard:** ping periódico para um serviço externo (tipo healthchecks.io); se o VPS morrer, é esse serviço que avisa.
 
+**Implementação (fase 4).**
+- Canal: **ntfy** (POST para um tópico secreto, `CORAL_NTFY_URL`, token opcional). Vigilância externa: **healthchecks.io** (`CORAL_HEALTHCHECK_URL`, ping a cada 60 s; um segundo check para os backups).
+- Avaliação a cada 60 s no processo do dashboard. Um alerta aberto por (player, tipo); notifica ao abrir e ao resolver; notificações falhadas são repetidas no ciclo seguinte.
+- Regras (limiares por omissão, configuráveis no `.env`):
+
+| Tipo | Abre quando |
+|---|---|
+| `offline` | sem heartbeat há mais de 10 min |
+| `sync_failing` | `sync.last_error` presente e último sync OK há mais de 30 min (ou nunca) |
+| `update_failed` | `update.state` é `rolled_back` ou `rejected` |
+| `disk_low` | disco livre abaixo de 2048 MB |
+| `temp_high` | temperatura acima de 80 °C |
+| `clock_drift` | `clock_drift` reportado, ou `player_time` a mais de 2 min da hora de receção |
+| `mpv_not_playing` | `mpv.state` diferente de `playing` em 2 heartbeats seguidos (exceto com `cleared`) |
+
+Os alertas de estado só se avaliam com o player online (offline já é o seu próprio alerta). Revogar um player resolve os seus alertas.
+
 ### 3.5 Backups
 
 - Diário: `sqlite3 .backup` + `media/` + `releases/` para fora do VPS (restic para um Storage Box ou equivalente).
 - O **restauro é testado** antes de ir para produção.
 
 ---
+
+**Implementação (fase 4).** `signagectl backup snapshot` (cópia consistente com a API `backup` do SQLite) + `restic` para uma **Hetzner Storage Box** (SFTP), diário às 03:30 por timer systemd, retenção 7 diários / 4 semanais / 6 mensais, `restic check` semanal e ping ao healthchecks.io só em caso de sucesso. `signagectl verify-data` valida um diretório restaurado (integridade da DB, sha256 de cada media e release, nada referenciado em falta).
 
 ## 4. Player (Raspberry Pi 5)
 
@@ -360,13 +379,15 @@ O player só pede o manifest quando o `playlist_hash` da resposta difere do últ
 
 Para o dia em que nem o update nem o rollback funcionem: **WireGuard** (ou túnel SSH reverso) do Pi para o VPS, SSH só por chave e apenas acessível pela interface do túnel. Fica fora do caminho normal de operação.
 
+**Implementação (fase 4).** Servidor WireGuard no VPS do dashboard (`wg0`, 10.77.0.1/16, UDP 51820). A chave privada de cada Pi é gerada no próprio Pi; `signagectl player wg-add <id> --pubkey <chave>` atribui-lhe um IP 10.77.x.y e regista o peer; revogar o player remove-o. No Pi, `AllowedIPs = 10.77.0.1/32` (só fala com o VPS) e `PersistentKeepalive = 25` (CGNAT, ~6 MB/mês). O SSH ao Pi é só por chave; com `--ssh-only-wireguard` só é aceite na interface `wg0`. Acesso: `ssh -J <vps> <utilizador>@10.77.x.y`.
+
 ---
 
 ## 7. Segurança
 
 **Dashboard**
 - HTTPS obrigatório (Caddy, TLS automático) e redirecionamento de HTTP.
-- Password com hash **argon2id**; rate limit e atraso progressivo no login.
+- Password com hash **argon2id**; rate limit e atraso progressivo no login (fase 4: por IP, a partir da 5.ª falha o atraso dobra até 60 s; à 20.ª, bloqueio de 15 min).
 - Cookies `Secure`, `HttpOnly`, `SameSite=Strict`; proteção CSRF em todos os formulários.
 - Cabeçalhos de segurança (CSP, `X-Content-Type-Options`, etc.).
 - Limite de corpo de pedido ajustado ao upload (Caddy), escrita em streaming; validação de ficheiros por `ffprobe`; nomes gerados pelo servidor.
@@ -390,6 +411,8 @@ Para o dia em que nem o update nem o rollback funcionem: **WireGuard** (ou túne
 - `install.sh` no Pi: instala dependências, updater, serviços systemd, chrony, chave pública de releases, `config.toml` e token. No fim, o Pi faz o primeiro heartbeat.
 - `signagectl player revoke <id>` invalida o token. A substituição de um Pi é: revogar, criar novo, instalar.
 - O script cria também a partição de dados e configura o watchdog.
+
+**Implementação (fase 4).** `deploy/pi/install.sh` (idempotente, corre como root num Pi com o SO instalado): pacotes (mpv, polkitd, minisign, chrony, wireguard-tools, unattended-upgrades), utilizador e diretórios, chave pública, release verificada com minisign antes de extrair, configuração e token, units, polkit, updater, chrony (`makestep 1 -1`, sem RTC), watchdog de hardware (`RuntimeWatchdogSec`) e atualizações automáticas só de segurança. Opções: WireGuard, `--dry-run` e, **só em Pis novos**, partição de dados + root só-leitura: a partição monta em `/srv/signage` e `/opt/signage`, `/var/lib/signage` e `/var/lib/signage-updater` são bind mounts para lá (o agente e o updater têm de persistir); o overlay ativa-se com `raspi-config`; com overlay as atualizações automáticas do SO ficam desligadas e fazem-se em "modo manutenção" (overlay desligado). A partição de dados num Pi já instalado cria-se a partir do microSD de reserva, encolhendo a root do SSD offline.
 
 ### 8.2 Monitorização
 
