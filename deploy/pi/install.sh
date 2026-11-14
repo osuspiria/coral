@@ -37,6 +37,7 @@ WG_ADDRESS="" WG_ENDPOINT="" WG_SERVER_PUBKEY="" WIREGUARD_ONLY=0 SSH_ONLY_WG=0
 DATA_PARTITION="" READONLY_ROOT=0 FORCE=0 DRY_RUN=0
 OS_RELEASE=${CORAL_OS_RELEASE:-/etc/os-release}   # overridable for tests
 PYTHON=${CORAL_INSTALL_PYTHON:-python3}
+WATCHDOG_MAX_FILE=${CORAL_WATCHDOG_MAX_FILE:-/sys/class/watchdog/watchdog0/max_timeout}
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -250,12 +251,17 @@ setup_time_and_watchdog() {
 makestep 1 -1
 EOF
     run systemctl enable --now chrony
-    local max=15
-    if [ -r /sys/class/watchdog/watchdog0/max_timeout ]; then
-        max=$(cat /sys/class/watchdog/watchdog0/max_timeout)
+    # Some kernels report max_timeout 0 (unknown): never write 0s, that disables it.
+    local max="" timeout=15
+    if [ -r "$WATCHDOG_MAX_FILE" ]; then
+        max=$(tr -d '[:space:]' < "$WATCHDOG_MAX_FILE")
     fi
-    local timeout=$(( max < 15 ? max : 15 ))
-    echo "hardware watchdog: max ${max}s, using ${timeout}s"
+    if [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ]; then
+        timeout=$(( max < 15 ? max : 15 ))
+        echo "hardware watchdog: max ${max}s, using ${timeout}s"
+    else
+        echo "hardware watchdog: max unknown (${max:-not readable}), using ${timeout}s"
+    fi
     write_file /etc/systemd/system.conf.d/signage-watchdog.conf 644 <<EOF
 # CORAL: systemd feeds the hardware watchdog; a total hang reboots the Pi (spec 4.1).
 [Manager]

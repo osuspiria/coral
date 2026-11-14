@@ -101,6 +101,25 @@ def test_refuses_old_python(env, tmp_path):
     assert result.returncode == 1 and "3.11" in result.stderr
 
 
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("10\n", "max 10s, using 10s"),
+        ("60\n", "max 60s, using 15s"),
+        ("0\n", "max unknown (0), using 15s"),  # seen on the first Pi 5: never write 0s
+        ("", "max unknown (not readable), using 15s"),
+        (None, "max unknown (not readable), using 15s"),
+    ],
+)
+def test_watchdog_timeout(env, tmp_path, content, expected):
+    max_file = tmp_path / "max_timeout"
+    if content is not None:
+        max_file.write_text(content)
+    result = run({**env, "CORAL_WATCHDOG_MAX_FILE": str(max_file)}, *FIRST)
+    assert result.returncode == 0, result.stderr
+    assert f"hardware watchdog: {expected}" in result.stdout
+
+
 def test_readonly_root_plan(env):
     result = run(env, *FIRST, "--data-partition", "/dev/nvme0n1p3", "--readonly-root")
     assert result.returncode == 0, result.stderr
