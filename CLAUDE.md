@@ -67,7 +67,7 @@ A especificação completa está em `docs/especificacao-tecnica.md` (v1.2). É a
 | 3 | Updater assinado, selftest, rollback, canais |
 | 4 | Alertas, backups, hardening, provisionamento, acesso de emergência (WireGuard) |
 
-**Fase atual: 3 — aceite em 14/10/2026** (fases 1 e 2 aceites a 13/10/2026; registos na spec §10.3). A fase 4 começa quando for planeada. Não avances para a fase seguinte sem o critério de aceitação da atual cumprido (spec §10.3).
+**Fase atual: 4 — implementada, em validação** (fases 1 e 2 aceites a 13/10/2026, fase 3 a 14/10/2026; registos na spec §10.3). Falta a checklist manual de `docs/cenarios-falha.md` e o registo da aceitação. Não avances para a fase seguinte sem o critério de aceitação da atual cumprido (spec §10.3).
 
 ## Comandos úteis
 
@@ -98,4 +98,4 @@ python3 tools/release.py 0.3.1 --key ~/.minisign/coral-release.key
 PYTHONPATH=dashboard:tools python -m signagectl release add coral-player-0.3.1.tar.gz coral-player-0.3.1.tar.gz.minisig
 ```
 
-Instalação: `docs/instalacao-vps.md` e `docs/instalacao-pi.md`. Releases, chaves e canais: `docs/releases.md`.
+Instalação: `docs/instalacao-vps.md` e `docs/instalacao-pi.md` (`deploy/pi/install.sh`). Releases, chaves e canais: `docs/releases.md`. Operação: `docs/runbook.md` (alertas), `docs/backups-restauro.md`, `docs/acesso-emergencia.md`, `docs/cenarios-falha.md` (§9 → testes).
