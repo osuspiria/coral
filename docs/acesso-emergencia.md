@@ -30,7 +30,7 @@ Se o fornecedor tiver firewall própria (além do ufw), abrir lá também UDP 51
 
 ## 2. Cada Pi
 
-1. No Pi, o `install.sh` já gerou a chave e mostrou a pública (`WireGuard public key of this Pi: …`). Para a voltar a ver: `sudo wg pubkey < /etc/wireguard/signage.key`.
+1. No Pi, o `install.sh` já gerou a chave e mostrou a pública (`WireGuard public key of this Pi: …`). Para a voltar a ver: `sudo sh -c 'wg pubkey < /etc/wireguard/signage.key'` (com `sudo wg pubkey < …` a redireção é feita pela tua shell, sem root, e dá `Permission denied`).
 2. No VPS:
    ```bash
    cd /opt/coral
@@ -38,6 +38,16 @@ Se o fornecedor tiver firewall própria (além do ufw), abrir lá também UDP 51
        --env-file /etc/coral/dashboard.env player wg-add <id> --pubkey <chave-do-pi>
    ```
    O comando imprime **dois passos**: os comandos `sudo wg set …` / `sudo wg-quick save wg0` para correr no VPS, e o comando `install.sh --wireguard-only …` para correr no Pi. Correr ambos.
+
+   O comando do Pi usa o `install.sh` da **release instalada** (`/opt/signage/current/deploy/pi/`). Se essa release for anterior a `05ff43b` (sem `MTU = 1280` nem o override do `wg-quick@wg0`), copiar o `install.sh` do repositório para o Pi e correr esse, com os mesmos argumentos:
+   ```bash
+   # no portátil
+   ssh <admin>@<vps> cat /opt/coral/deploy/pi/install.sh | ssh <utilizador>@<pi> 'cat > /tmp/install.sh'
+   # no Pi
+   sudo bash /tmp/install.sh --wireguard-only --wg-address 10.77.x.y --wg-endpoint <vps>:51820 --wg-server-pubkey <chave>
+   ```
+
+   A chave SSH do portátil tem de estar no `~/.ssh/authorized_keys` do utilizador do Pi. Se o Pi tiver Tailscale SSH (`tailscale up --ssh`), o `ssh-copy-id` pelo nome do Tailscale pode ficar parado à espera de uma verificação no browser: nesse caso, acrescentar a chave à mão numa sessão já aberta.
 3. Confirmar: no VPS, `sudo wg show` mostra o peer com `latest handshake` recente; `ping 10.77.x.y` responde.
 
 O `wg0.conf` gerado no Pi usa `MTU = 1280` (rede móvel) e o `install.sh` instala um override do `wg-quick@wg0` (`/etc/systemd/system/wg-quick@wg0.service.d/10-signage.conf`): arranca depois de `network-online.target` e volta a tentar a cada 30 s se falhar (por exemplo, se o hotspot ainda não tiver rede no arranque).
@@ -64,6 +74,19 @@ Passa a aceitar SSH só por chave e só na interface `wg0` (o SSH pela rede loca
 `signagectl player revoke <id>` (ou `player wg-remove <id>`) imprime os comandos `wg set … remove` para correr no VPS.
 
 ## 5. Migrar o piloto (rede manual 10.8 → 10.77)
+
+> **Feito a 14/11/2026.** Na prática foi mais simples do que o descrito abaixo: o
+> túnel manual do Pi nunca tinha chegado a funcionar (`wg-quick@wg0` desativado no
+> Pi, peer `10.8.0.10` sem handshake no VPS), por isso não foi preciso o `wg1`.
+> Passos seguidos: (1) atualizar o dashboard no VPS para a fase 4 (`instalacao-vps.md`
+> §6, com backup da SQLite antes); (2) parar a `wg0` manual no VPS e no portátil e
+> guardar os ficheiros em `/etc/wireguard/legacy-10.8/`; (3) secção 1; (4) no Pi,
+> mover a configuração manual para `legacy-10.8/`, gerar `signage.key` e secção 2
+> com o `install.sh` do repositório; (5) `ssh -J` com o Tailscale desligado e reboot.
+> Resultado: piloto (player 1) em `10.77.0.2`, utilizador `coral`.
+>
+> O procedimento abaixo continua válido se um dia houver um túnel manual **ativo**
+> a migrar sem perder o acesso.
 
 O piloto de Pombal e o VPS foram configurados à mão antes desta implementação (`docs/acesso-remoto-pi-tailscale-wireguard.md`): `wg0` em `10.8.0.0/24`, com o portátil como peer e encaminhamento entre peers. Esse `wg0` ocupa o mesmo nome e a mesma porta que o desenho de referência, por isso a secção 1 não se pode correr por cima dele.
 
@@ -93,7 +116,7 @@ Ideia: a rede manual passa para **`wg1` (UDP 51821)**, a nova `wg0` (10.77) mont
    ```
    No portátil, mudar o `Endpoint` do `wg0` manual para a porta 51821 (só se ainda se quiser esse caminho durante a migração).
 3. **VPS — nova `wg0` (10.77):** secção 1 deste documento (a `server.key` já está livre) e as variáveis `CORAL_WG_*` no `dashboard.env`; reiniciar o `coral-dashboard`.
-4. **Pi — registar e configurar a nova `wg0`:** a chave do Pi para este desenho é `/etc/wireguard/signage.key` (diferente da `pi.key` manual). Se o `install.sh` já correu, a pública vê-se com `sudo wg pubkey < /etc/wireguard/signage.key`; se não, `sudo /opt/signage/current/deploy/pi/install.sh --wireguard-only` gera-a e mostra-a. Depois, secção 2 (`signagectl player wg-add` no VPS + `install.sh --wireguard-only --wg-address …` no Pi).
+4. **Pi — registar e configurar a nova `wg0`:** a chave do Pi para este desenho é `/etc/wireguard/signage.key` (diferente da `pi.key` manual). Se o `install.sh` já correu, a pública vê-se com `sudo sh -c 'wg pubkey < /etc/wireguard/signage.key'`; se não, `sudo /opt/signage/current/deploy/pi/install.sh --wireguard-only` gera-a e mostra-a. Depois, secção 2 (`signagectl player wg-add` no VPS + `install.sh --wireguard-only --wg-address …` no Pi).
 5. **Testar**, com o Tailscale desligado no portátil (`tailscale down`): `ssh -J <admin>@<vps> <utilizador>@10.77.x.y`. Fazer também o teste de corte de corrente (`docs/cenarios-falha.md`) e confirmar que a `wg0` volta sozinha.
 6. **Retirar a rede manual** (só depois do passo 5):
    ```bash

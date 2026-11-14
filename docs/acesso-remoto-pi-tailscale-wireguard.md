@@ -145,7 +145,12 @@ Por defeito a chave de um nó expira (~180 dias) e o aparelho perde acesso.
 
 ## 4. WireGuard (acesso de reserva via Hetzner)
 
-> **A substituir.** Esta rede (`10.8.0.0/24`, portátil como peer, encaminhamento
+> **Substituída a 14/11/2026.** Na verificação antes da migração viu-se que o
+> túnel do Pi nunca tinha funcionado (`wg-quick@wg0` desativado, sem handshake no
+> servidor). O piloto está agora em `10.77.0.2` (`docs/acesso-emergencia.md` §5);
+> os ficheiros antigos ficaram em `/etc/wireguard/legacy-10.8/` até à limpeza.
+>
+> Esta rede (`10.8.0.0/24`, portátil como peer, encaminhamento
 > entre peers no servidor) não é o desenho de referência: lá cada Pi só fala com
 > o VPS e o acesso é por `ssh -J`. Não usar para novos aparelhos; migração do
 > piloto em `docs/acesso-emergencia.md` §5. Fica aqui como registo.
