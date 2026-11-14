@@ -1,164 +1,140 @@
 # Instalação do player (Raspberry Pi 5)
 
-Pressupostos: Raspberry Pi OS **Lite** 64-bit já instalado e a arrancar pelo SSD, com Wi-Fi ligado ao hotspot. Os comandos correm no Pi, com teclado/ecrã ou SSH **apenas durante a instalação**. A instalação inicial é manual e está aqui descrita passo a passo (o `install.sh` é da fase 4). A partir da **0.3.0** o player atualiza-se sozinho com releases assinadas (updater, ver `docs/releases.md`); só a primeira instalação e as mudanças de units systemd são manuais.
+Pressupostos: Raspberry Pi OS **Lite** 64-bit instalado no SSD (Debian 12 ou 13), Wi-Fi ligado ao hotspot, acesso por teclado/ecrã ou SSH **durante a instalação**. A instalação faz-se com `deploy/pi/install.sh` (idempotente: pode correr outra vez sem estragar nada). A partir daí o código atualiza-se sozinho com releases assinadas (`docs/releases.md`).
 
-## 0. Confirmar a máquina (não assumir)
+## 0. No dashboard
 
 ```bash
-cat /etc/os-release | head -3        # esperado: Debian 12 (bookworm) ou 13 (trixie)
-python3 --version                    # tem de ser ≥ 3.11
-uname -m                             # aarch64
-timedatectl show -p NTPSynchronized  # relógio sincronizado?
-findmnt /                            # root normal ou overlay? (o agente só escreve em /var/lib/signage)
+# no VPS (ver docs/instalacao-vps.md §5)
+signagectl player add --label <nome> --location "<local>"     # guardar o token (mostrado uma vez)
 ```
 
-Se o Python for < 3.11, **parar** e reportar: o agente usa `tomllib` (3.11+).
+## 1. Copiar os ficheiros para o Pi
 
-## 1. Pacotes
-
-```bash
-sudo apt update
-sudo apt install -y mpv polkitd minisign
-mpv --version | head -1              # anotar a versão (IPC validado no 0.34.1 e no 0.40.0 do Pi 5)
-sudo apt install -y ffmpeg           # só para o teste de validação do passo 7 (pode remover-se depois)
-pkaction --version                   # polkit ≥ 0.106 (regras em JavaScript); o Bookworm traz o 122
-minisign -v                          # verificação das releases (spec §6)
-```
-
-O agente não tem dependências Python externas (só a stdlib), não há `pip install`.
-
-## 2. Utilizador e diretórios
+Do computador de desenvolvimento (release assinada, ver `docs/releases.md`):
 
 ```bash
-sudo useradd --system --home-dir /var/lib/signage --no-create-home \
-    --shell /usr/sbin/nologin --groups video,render,audio signage
-sudo mkdir -p /opt/signage/releases /etc/signage
-```
-
-## 3. Código (release)
-
-Usar uma release assinada, construída no computador de desenvolvimento como em `docs/releases.md` (`dist/coral-player-<v>.tar.gz` + `.minisig`). Copiar para o Pi os dois ficheiros e a chave pública:
-
-```bash
-V=0.3.0
+V=0.3.5
 scp dist/coral-player-$V.tar.gz dist/coral-player-$V.tar.gz.minisig deploy/pi/release-pubkey.pub \
-    <utilizador>@<ip-do-pi>:                              # os ":" no fim são obrigatórios
+    <utilizador>@<ip-do-pi>:                    # os ":" no fim são obrigatórios
 ```
 
-No Pi, verificar a assinatura **antes** de instalar e só depois extrair:
+## 2. Correr o instalador
+
+No Pi:
 
 ```bash
-V=0.3.0
-sudo install -m 644 release-pubkey.pub /etc/signage/release-pubkey.pub
-minisign -V -p /etc/signage/release-pubkey.pub -m coral-player-$V.tar.gz   # "Signature and comment signature verified"
-sudo mkdir -p /opt/signage/releases/$V
-sudo tar xzf coral-player-$V.tar.gz -C /opt/signage/releases/$V
-sudo ln -sfn /opt/signage/releases/$V /opt/signage/current
-ls /opt/signage/current/player/assets/fallback.png
+V=0.3.5
+mkdir -p ~/coral-install && tar xzf coral-player-$V.tar.gz -C ~/coral-install deploy/pi/install.sh
+echo '<token>' > ~/token && chmod 600 ~/token
+sudo ~/coral-install/deploy/pi/install.sh --dry-run \
+    --release ~/coral-player-$V.tar.gz --pubkey ~/release-pubkey.pub \
+    --server https://<nome-dns-do-dashboard> --token-file ~/token       # ver o que vai fazer
+sudo ~/coral-install/deploy/pi/install.sh \
+    --release ~/coral-player-$V.tar.gz --pubkey ~/release-pubkey.pub \
+    --server https://<nome-dns-do-dashboard> --token-file ~/token
+rm ~/token
 ```
 
-## 4. Configuração e token
+O instalador:
 
-```bash
-sudo cp /opt/signage/current/player/config.example.toml /etc/signage/config.toml
-sudo nano /etc/signage/config.toml        # server_url = "https://<nome-dns-do-dashboard>"
-echo '<token-dado-pelo-signagectl>' | sudo tee /etc/signage/token > /dev/null
-sudo chown root:signage /etc/signage/config.toml /etc/signage/token
-sudo chmod 640 /etc/signage/config.toml
-sudo chmod 640 /etc/signage/token
-```
+- confirma o SO e o Python ≥ 3.11 (pára se não for o caso);
+- instala mpv, polkitd, minisign, chrony, wireguard-tools, unattended-upgrades, nftables;
+- cria o utilizador `signage`, **verifica a assinatura da release antes de extrair**, escreve `config.toml` e token (nunca os reescreve se já existirem);
+- instala os serviços (mpv, agente, updater + timer), a regra polkit, o journald limitado;
+- configura o **chrony** (o Pi não tem RTC: o relógio é acertado de uma vez sempre que estiver errado), o **watchdog de hardware** (o limite é lido do próprio dispositivo) e as **atualizações automáticas só de segurança**;
+- gera a chave WireGuard do Pi e mostra a pública (para o acesso de emergência, `docs/acesso-emergencia.md`).
 
-(O token fica legível pelo grupo `signage`, porque o agente corre como esse utilizador; ninguém mais o lê.)
+O ecrã mostra logo o fallback (azul-escuro) e, depois do primeiro sync, a playlist atribuída.
 
-## 5. Serviços systemd
-
-```bash
-D=/opt/signage/current/deploy/pi
-sudo cp $D/mpv.service $D/signage-agent.service /etc/systemd/system/
-sudo cp $D/tmpfiles-signage.conf /etc/tmpfiles.d/signage.conf
-sudo mkdir -p /etc/systemd/journald.conf.d
-sudo cp $D/journald-signage.conf /etc/systemd/journald.conf.d/signage.conf
-sudo install -m 644 $D/polkit-signage.rules /etc/polkit-1/rules.d/50-signage.rules
-sudo systemd-tmpfiles --create /etc/tmpfiles.d/signage.conf
-sudo systemctl restart systemd-journald
-# Updater (fica fora das releases e não se atualiza a si próprio, spec §6.1):
-sudo rm -rf /opt/signage/updater && sudo mkdir -p /opt/signage/updater
-sudo cp -r /opt/signage/current/player/updater/coral_updater /opt/signage/updater/
-sudo cp $D/signage-updater.service $D/signage-updater.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now mpv.service signage-agent.service signage-updater.timer
-```
-
-O ecrã deve mostrar logo a imagem de fallback (azul-escuro liso). Depois do primeiro sync passa para a playlist atribuída.
-
-A regra polkit permite ao utilizador `signage` (sem root) fazer só duas coisas: `systemctl restart mpv.service` (comando `restart-player` e reinício automático do mpv bloqueado) e `systemctl reboot` (comando `reboot`). Confirmar:
-
-```bash
-sudo -u signage systemctl --no-ask-password restart --no-block mpv.service && echo "restart OK"
-sudo -u signage systemctl --no-ask-password stop mpv.service   # tem de ser RECUSADO (fora da regra)
-sudo systemctl start mpv.service
-```
-
-## 6. Verificar
+## 3. Verificar
 
 ```bash
 systemctl status mpv signage-agent
-systemctl list-timers signage-updater.timer      # próxima execução do updater
-journalctl -u signage-updater -n 20 --no-pager   # o que o updater fez
-cat /var/lib/signage-updater/status.json 2>/dev/null   # estado do último update
+systemctl list-timers signage-updater.timer
 journalctl -u signage-agent -f            # "Connected to mpv", "Applied manifest ...", sem "Heartbeat failed"
-journalctl -u mpv -b --no-pager | tail -30
-sudo cat /var/lib/signage/state.json      # playing, last_sync_*, last_heartbeat_*, clock_drift
-ls -la /var/lib/signage/media
+cat /etc/systemd/system.conf.d/signage-watchdog.conf
+chronyc tracking | head -3
 ```
 
-**Saída de vídeo no Pi 5** (validado no primeiro Pi, mpv 0.40.0): o `mpv.service` usa `--vo=gpu --gpu-context=drm --drm-device=/dev/dri/by-path/platform-axi:gpu-card --swapchain-depth=1`.
+No dashboard, o player aparece **online** com a versão, disco, temperatura e uptime.
 
-- O ecrã está no dispositivo `vc4` (`platform-axi:gpu-card`). O `card0` costuma ser o `v3d`, sem saídas, e a numeração `cardN` pode mudar entre arranques. Confirmar com `ls -l /dev/dri/by-path/` e `cat /sys/class/drm/card*-HDMI-A-*/status`.
-- Sem `--swapchain-depth=1` cada imagem só aparece quando chega o frame seguinte, ou seja, com um item de atraso (a IMAGEM 2 de uma lista "pisca" e a IMAGEM 1 fica no ecrã o tempo das duas). O `--vo=drm` tem o mesmo problema.
+## 4. Saída de vídeo (validado no primeiro Pi 5, mpv 0.40.0)
+
+O `mpv.service` usa `--vo=gpu --gpu-context=drm --drm-device=/dev/dri/by-path/platform-axi:gpu-card --swapchain-depth=1`:
+
+- O ecrã está no dispositivo `vc4` (`platform-axi:gpu-card`); o `card0` costuma ser o `v3d`, sem saídas, e a numeração `cardN` pode mudar entre arranques. Confirmar com `ls -l /dev/dri/by-path/` e `cat /sys/class/drm/card*-HDMI-A-*/status`.
+- Sem `--swapchain-depth=1` cada imagem aparece com um item de atraso (o `--vo=drm` tem o mesmo problema).
 - Os avisos `VT_GETMODE failed` ao correr o mpv por SSH são inofensivos.
 
-## 7. Validar o comportamento do mpv no Pi (invariante 3)
-
-Este teste usa o mpv real do Pi, no ecrã, e confirma que uma lista nova não reinicia o item em reprodução. Pára os serviços enquanto corre:
+Teste do comportamento do mpv no ecrã real (lista nova sem interromper o item em reprodução):
 
 ```bash
+sudo apt install -y ffmpeg      # só para o teste
 sudo systemctl stop signage-agent mpv
 sudo -u signage env PYTHONPATH=/opt/signage/current/player \
     python3 /opt/signage/current/player/tests/test_mpv_real.py --vo=drm
-# --vo=drm basta aqui: o teste verifica o estado do mpv, não a imagem no ecrã
 sudo systemctl start mpv signage-agent
 ```
 
-O resultado esperado é cinco linhas `OK` e `All checks passed.` Guardar a saída (inclui a versão do mpv). No primeiro Pi (mpv 0.40.0) passaram as cinco.
+Esperado: cinco linhas `OK` e `All checks passed.`
 
-Este teste verifica o estado do mpv, não o que aparece no ecrã. Para confirmar que as imagens aparecem a tempo, gerar duas imagens e mostrá-las com durações diferentes (vermelho 2 s, verde 6 s); se o vermelho ficar 6 s e o verde 2 s, há um item de atraso (falta `--swapchain-depth=1`):
+## 5. Pis novos: partição de dados e root só-leitura (spec §4.1)
+
+Com root só-leitura (overlay), um corte de energia não pode corromper o sistema: tudo o que é escrito na root perde-se no arranque seguinte. O que tem de persistir (releases, media, estado do agente e do updater) vai para uma **partição de dados** própria.
+
+### 5.1 Criar a partição de dados (com o microSD de reserva)
+
+O Raspberry Pi OS expande a root para o disco inteiro no primeiro arranque; para criar a partição 3 é preciso encolher a root **com ela desmontada**, ou seja, arrancando pelo **microSD de reserva**:
+
+1. Desligar o Pi, pôr o microSD (Raspberry Pi OS) e arrancar por ele (se o SSD tiver prioridade, ajustar a ordem de arranque com `sudo raspi-config` → Advanced → Boot Order).
+2. No Pi arrancado pelo SD, **confirmar os nomes na máquina** antes de qualquer comando:
+   ```bash
+   lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT      # esperado: nvme0n1p1 (boot), nvme0n1p2 (root), nada do nvme montado
+   ```
+3. Encolher a root do SSD (exemplo: 32 GiB para o sistema) e criar a partição de dados no resto:
+   ```bash
+   sudo e2fsck -f /dev/nvme0n1p2
+   sudo resize2fs /dev/nvme0n1p2 30G               # o sistema de ficheiros fica abaixo da partição nova
+   sudo parted /dev/nvme0n1 ---pretend-input-tty resizepart 2 32GiB
+   sudo resize2fs /dev/nvme0n1p2                   # volta a ocupar a partição (32 GiB)
+   sudo parted /dev/nvme0n1 mkpart primary ext4 32GiB 100%
+   lsblk /dev/nvme0n1                              # aparece nvme0n1p3, sem sistema de ficheiros
+   ```
+4. Desligar, retirar o microSD, arrancar pelo SSD.
+
+### 5.2 Instalar com partição de dados e overlay
 
 ```bash
-sudo systemctl stop signage-agent mpv
-cd /tmp
-ffmpeg -v error -y -f lavfi -i color=c=red:s=1920x1080 -frames:v 1 r.png
-ffmpeg -v error -y -f lavfi -i color=c=green:s=1920x1080 -frames:v 1 g.png
-sudo -u signage timeout 20 mpv --vo=gpu --gpu-context=drm \
-    --drm-device=/dev/dri/by-path/platform-axi:gpu-card --swapchain-depth=1 \
-    --loop-playlist=inf --really-quiet \
-    --{ --image-display-duration=2 /tmp/r.png --} --{ --image-display-duration=6 /tmp/g.png --}
-sudo systemctl start mpv signage-agent
+sudo ~/coral-install/deploy/pi/install.sh ... --data-partition /dev/nvme0n1p3 --readonly-root
+sudo reboot
 ```
 
-## 8. Atualizações
+O instalador formata a partição (recusa se já tiver outro sistema de ficheiros ou dados que não sejam nossos, a não ser com `--force`), monta-a em `/srv/signage`, liga `/opt/signage`, `/var/lib/signage` e `/var/lib/signage-updater` a ela (copiando o que já lá estiver), desliga as atualizações automáticas do SO (com overlay perder-se-iam) e ativa o overlay. Depois do reboot: `findmnt /` mostra `overlay`.
 
-**A partir da 0.3.0 são automáticas**: publicar a release no dashboard e escolher a versão no canal ou no player (`docs/releases.md`). O Pi faz o resto no minuto seguinte ao heartbeat: descarrega, verifica a assinatura, corre o selftest, troca de versão e confirma; se a versão nova não confirmar em ~3 min, volta à anterior sozinho e o dashboard mostra a versão como falhada.
+### 5.3 Modo manutenção (atualizar o SO com overlay)
 
-**Passar um Pi de 0.2.x para 0.3.0** (uma vez, porque a 0.2.x não tem updater): instalar o minisign (passo 1), seguir o passo 3 com a release 0.3.0 e o passo 5 completo (units novos, tmpfiles, updater e timer). Os units de `mpv` e `signage-agent` não mudaram, mas convém copiá-los de novo.
+```bash
+sudo raspi-config nonint do_overlayfs 1 && sudo reboot        # desligar o overlay
+sudo apt update && sudo apt full-upgrade                      # atualizar
+sudo raspi-config nonint do_overlayfs 0 && sudo reboot        # voltar a ligar
+```
 
-**Mudanças nos units systemd ou na regra polkit** nunca chegam pelo updater: repetir os comandos do passo 5 que lhes dizem respeito.
+As atualizações do **código do player** não precisam disto: vivem na partição de dados e o updater trata delas.
 
-**Voltar atrás à mão** (se for preciso): `sudo ln -sfn /opt/signage/releases/<versão> /opt/signage/current && sudo systemctl restart mpv signage-agent`.
+## 6. Pis já instalados (como o p0)
 
-## 9. Notas e limitações
+Correr o `install.sh` com a release atual (sem `--data-partition`/`--readonly-root`): instala o que faltar (chrony, watchdog, atualizações de segurança, chave WireGuard) e não mexe na configuração, no token nem na versão em uso. Para passar um Pi já instalado para partição de dados + overlay: secção 5 (5.1 e depois 5.2 com a mesma release).
 
-- Root só-leitura (overlay), partição de dados separada, watchdog de hardware, chrony e `install.sh` são da fase 4. O agente já só escreve em `/var/lib/signage` e usa escritas atómicas, por isso aguenta cortes de energia.
-- Heartbeat a cada 30–60 s (valor do servidor). O dashboard mostra o player offline ao fim de 3 heartbeats falhados. Os erros ficam também no journal e em `state.json`.
-- Sem progresso no ecrã durante mais de 2 min (ou a duração da imagem + 30 s), o agente reinicia o `mpv.service` e reporta-o.
-- O updater corre como root (precisa de escrever em `/opt/signage` e reiniciar serviços); o agente continua sem privilégios e só pede e confirma updates através de ficheiros em `/var/lib/signage/update/`. São mantidas as últimas 3 releases, mais a atual e a anterior.
+## 7. Atualizações
+
+- **Código do player:** automáticas a partir da 0.3.0 (`docs/releases.md`).
+- **Units systemd, regra polkit, código do updater:** nunca chegam pelo updater. Para os aplicar num Pi já instalado, correr outra vez o `install.sh` com a release nova.
+- **Voltar atrás à mão:** `sudo ln -sfn /opt/signage/releases/<versão> /opt/signage/current && sudo systemctl restart mpv signage-agent`.
+
+## 8. Notas
+
+- O agente corre sem root e só escreve em `/var/lib/signage`; o updater (root) só lê os pedidos do agente e guarda o seu estado em `/var/lib/signage-updater`.
+- São mantidas as últimas 3 releases, mais a atual e a anterior.
+- Heartbeat a cada 30–60 s; offline no dashboard ao fim de 3 heartbeats falhados; alertas por ntfy (`docs/runbook.md`).
+- Sem progresso no ecrã durante mais de 2 min (ou a duração da imagem + 30 s), o agente reinicia o mpv e reporta-o.

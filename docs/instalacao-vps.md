@@ -111,6 +111,9 @@ Editar `/etc/coral/dashboard.env`:
 - `CORAL_COOKIE_SECURE=true` (obrigatório em produção).
 - Perfil de vídeo (`CORAL_VIDEO_*`): valores iniciais da spec §4.5, a afinar depois dos testes no ecrã.
 - `CORAL_HEARTBEAT_INTERVAL_S` (opcional, 30–60, por omissão 60): intervalo de heartbeat enviado aos players; um player fica offline ao fim de 3 intervalos sem contacto.
+- **Alertas (fase 4):** `CORAL_NTFY_URL=https://ntfy.sh/<tópico-secreto>` (o tópico funciona como password: nome longo e aleatório; instalar a app ntfy e subscrevê-lo), `CORAL_NTFY_TOKEN` (só com servidor ntfy próprio com autenticação). Limiares opcionais `CORAL_ALERT_*` (ver `.env.example`).
+- **Vigilância externa:** `CORAL_HEALTHCHECK_URL` = URL de ping do check "coral-dashboard" no healthchecks.io (período 1 min, tolerância ~3 min). Se o dashboard ou o VPS morrerem, é o healthchecks.io que avisa.
+- **Acesso de emergência:** `CORAL_WG_ENDPOINT` e `CORAL_WG_SERVER_PUBKEY` (ver `docs/acesso-emergencia.md`).
 
 ## 4. Serviço e Caddy
 
@@ -144,7 +147,18 @@ cd /opt/coral && sudo git pull && sudo env UV_PYTHON_INSTALL_DIR=/opt/uv-python 
 sudo systemctl restart coral-dashboard   # as migrações correm no arranque
 ```
 
+## 7. Backups, acesso de emergência e atualizações de segurança
+
+- **Backups diários** com restic para a Storage Box: `docs/backups-restauro.md` (inclui o teste de restauro).
+- **WireGuard** para o acesso de emergência aos Pis: `docs/acesso-emergencia.md`.
+- **Atualizações de segurança automáticas** do VPS:
+  ```bash
+  sudo apt install -y unattended-upgrades
+  sudo dpkg-reconfigure -f noninteractive unattended-upgrades   # liga as atualizações de segurança
+  ```
+- **O que fazer com cada alerta:** `docs/runbook.md`.
+
 ## Notas
 
 - Um único worker uvicorn (a recolha diária de media apagada corre no próprio processo).
-- Backups, alertas e rate limit do login ficam para a fase 4.
+- O login de admin tem limite de tentativas por IP (atraso progressivo e bloqueio de 15 min); as tentativas falhadas ficam no journal do `coral-dashboard`.
