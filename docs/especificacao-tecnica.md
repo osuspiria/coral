@@ -130,7 +130,7 @@ Notas: a ordem usa `position` (não `order`, que é palavra reservada em SQL). A
 **Media**
 - Upload com escrita **em streaming** para disco. O nome guardado é `sha256.ext` (elimina path traversal e duplicados).
 - Validação por `ffprobe` (não pela extensão): tipo, codec, resolução, duração, bitrate. Ficheiros fora do perfil de compatibilidade (secção 4.5) são rejeitados com mensagem clara.
-- Imagens acima de 4096 px são redimensionadas.
+- Imagens acima de 4096 px (em qualquer lado) são rejeitadas, com uma mensagem a pedir que sejam redimensionadas antes do upload (o dashboard não as redimensiona; limite configurável em `CORAL_IMAGE_MAX_PX`).
 - Quota de disco: upload recusado abaixo de um limite mínimo de espaço livre.
 - Apagar media só remove a referência; o ficheiro físico é removido quando já nenhuma playlist o usa, após período de graça (ex.: 7 dias).
 
