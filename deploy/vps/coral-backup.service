@@ -1,12 +1,15 @@
 # /etc/systemd/system/coral-backup.service — daily restic backup (spec 3.5).
 [Unit]
-Description=CORAL dashboard backup (restic to the Storage Box)
+Description=CORAL dashboard backup (restic to Google Drive)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
 ExecStart=/opt/coral/deploy/vps/backup.sh
+# systemd sets no HOME: without a cache restic re-reads the repository index on every run.
+CacheDirectory=coral-backup
+Environment=RESTIC_CACHE_DIR=/var/cache/coral-backup
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=6h

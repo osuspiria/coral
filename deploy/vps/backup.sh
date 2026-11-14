@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Daily backup of the dashboard to a Hetzner Storage Box with restic (spec 3.5).
-# Run by coral-backup.service as root. Configuration in /etc/coral/backup.env:
-#   RESTIC_REPOSITORY=sftp:storagebox:coral        (Host "storagebox" in /root/.ssh/config)
+# Daily backup of the dashboard with restic (spec 3.5), to a Google Drive shared drive
+# through rclone. Run by coral-backup.service as root. Configuration in /etc/coral/backup.env:
+#   RESTIC_REPOSITORY=rclone:gdrive:coral          (remote "gdrive" in $RCLONE_CONFIG)
+#   RCLONE_CONFIG=/etc/coral/rclone.conf           (mode 600; service account key file)
 #   RESTIC_PASSWORD_FILE=/etc/coral/restic.pass    (mode 600; keep a copy OFF the VPS)
 #   HEALTHCHECK_BACKUP_URL=https://hc-ping.com/...  (optional; pinged only on success)
 set -euo pipefail

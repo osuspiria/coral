@@ -60,5 +60,5 @@ Ferramentas, da mais leve para a mais pesada:
 
 ## Backup falhado (aviso do healthchecks.io do check "backup")
 
-- `journalctl -u coral-backup -n 100` no VPS. Causas: Storage Box cheia ou inacessível, password do restic, chave SSH.
+- `journalctl -u coral-backup -n 100` no VPS. Causas: Google Drive inacessível (`sudo rclone --config /etc/coral/rclone.conf lsd gdrive:`), service account removida do Shared Drive ou chave revogada, password do restic.
 - Correr à mão depois de corrigir: `sudo systemctl start coral-backup` e confirmar o ping.

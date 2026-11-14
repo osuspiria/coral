@@ -149,7 +149,7 @@ sudo systemctl restart coral-dashboard   # as migrações correm no arranque
 
 ## 7. Backups, acesso de emergência e atualizações de segurança
 
-- **Backups diários** com restic para a Storage Box: `docs/backups-restauro.md` (inclui o teste de restauro).
+- **Backups diários** com restic para um Shared Drive do Google Workspace: `docs/backups-restauro.md` (inclui o teste de restauro).
 - **WireGuard** para o acesso de emergência aos Pis: `docs/acesso-emergencia.md`.
 - **Atualizações de segurança automáticas** do VPS:
   ```bash

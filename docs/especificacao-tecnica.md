@@ -196,7 +196,7 @@ Os alertas de estado só se avaliam com o player online (offline já é o seu pr
 
 ---
 
-**Implementação (fase 4).** `signagectl backup snapshot` (cópia consistente com a API `backup` do SQLite) + `restic` para uma **Hetzner Storage Box** (SFTP), diário às 03:30 por timer systemd, retenção 7 diários / 4 semanais / 6 mensais, `restic check` semanal e ping ao healthchecks.io só em caso de sucesso. `signagectl verify-data` valida um diretório restaurado (integridade da DB, sha256 de cada media e release, nada referenciado em falta).
+**Implementação (fase 4).** `signagectl backup snapshot` (cópia consistente com a API `backup` do SQLite) + `restic` para um **Shared Drive do Google Workspace** (backend `rclone`, autenticação por service account membro só desse drive; decidido a 14/11/2026 em vez da Hetzner Storage Box, por já existir espaço no Workspace), diário às 03:30 por timer systemd, retenção 7 diários / 4 semanais / 6 mensais, `restic check` semanal e ping ao healthchecks.io só em caso de sucesso. `signagectl verify-data` valida um diretório restaurado (integridade da DB, sha256 de cada media e release, nada referenciado em falta).
 
 ## 4. Player (Raspberry Pi 5)
 
