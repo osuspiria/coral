@@ -63,6 +63,8 @@ Sistema de digital signage para reprodução remota de imagens e vídeos. É com
 - Transcodificação automática (os ficheiros incompatíveis são rejeitados; transcodificação no VPS é uma evolução possível).
 - Comandos em tempo real (latência aceite: 30–60 s).
 - Agendamento de ecrã ligado/desligado (HDMI-CEC) — evolução futura.
+- Segundo acesso remoto na frota (Tailscale com tags/ACLs, ou Headscale no VPS) — evolução futura; hoje só no piloto (§6.4).
+- Watchdog de rede (reiniciar o Pi após N minutos sem rede, com backoff para não entrar em ciclo de reboots durante uma falha longa do hotspot) — evolução futura; hoje só no piloto, feito à mão.
 
 ---
 
@@ -379,7 +381,9 @@ O player só pede o manifest quando o `playlist_hash` da resposta difere do últ
 
 Para o dia em que nem o update nem o rollback funcionem: **WireGuard** (ou túnel SSH reverso) do Pi para o VPS, SSH só por chave e apenas acessível pela interface do túnel. Fica fora do caminho normal de operação.
 
-**Implementação (fase 4).** Servidor WireGuard no VPS do dashboard (`wg0`, 10.77.0.1/16, UDP 51820). A chave privada de cada Pi é gerada no próprio Pi; `signagectl player wg-add <id> --pubkey <chave>` atribui-lhe um IP 10.77.x.y e imprime os comandos a correr no VPS (`wg set` + `wg-quick save`, com sudo) e no Pi; revogar o player imprime a remoção do peer. O `signagectl` não mexe no `wg0` diretamente porque corre como o utilizador do dashboard, sem root (correr como root deixaria ficheiros da SQLite com dono errado). No Pi, `AllowedIPs = 10.77.0.1/32` (só fala com o VPS) e `PersistentKeepalive = 25` (CGNAT, ~6 MB/mês). O SSH ao Pi é só por chave; com `--ssh-only-wireguard` só é aceite na interface `wg0`. Acesso: `ssh -J <vps> <utilizador>@10.77.x.y`.
+**Implementação (fase 4).** Servidor WireGuard no VPS do dashboard (`wg0`, 10.77.0.1/16, UDP 51820). A chave privada de cada Pi é gerada no próprio Pi; `signagectl player wg-add <id> --pubkey <chave>` atribui-lhe um IP 10.77.x.y e imprime os comandos a correr no VPS (`wg set` + `wg-quick save`, com sudo) e no Pi; revogar o player imprime a remoção do peer. O `signagectl` não mexe no `wg0` diretamente porque corre como o utilizador do dashboard, sem root (correr como root deixaria ficheiros da SQLite com dono errado). No Pi, `AllowedIPs = 10.77.0.1/32` (só fala com o VPS) e `PersistentKeepalive = 25` (CGNAT, ~6 MB/mês). O SSH ao Pi é só por chave; com `--ssh-only-wireguard` só é aceite na interface `wg0`. Acesso: `ssh -J <vps> <utilizador>@10.77.x.y`. No Pi, o `wg0.conf` usa `MTU = 1280` e o `wg-quick@wg0` tem override systemd (depois de `network-online.target`, `Restart=on-failure`).
+
+**Tailscale (só no piloto).** O piloto de Pombal tem também Tailscale (`docs/acesso-remoto-pi-tailscale-wireguard.md`): um segundo caminho de acesso, fora do caminho normal de operação e da instalação padrão (`install.sh` não o instala). A expiração da chave do nó está desativada na consola Tailscale. Atenção: `--ssh-only-wireguard` bloqueia o `sshd` normal pela interface `tailscale0`; o Tailscale SSH (`tailscale up --ssh`) é tratado pelo próprio `tailscaled` e tem de ser confirmado no Pi antes de contar com ele. Se passa a fazer parte da frota é uma decisão em aberto (§1.2).
 
 ---
 
@@ -531,5 +535,6 @@ Problemas encontrados no Pi e corrigidos: o estado do update não aparecia na p�
 - **Decodificação de vídeo:** perfil de compatibilidade a confirmar com testes no Pi 5 e no ecrã real.
 - **Comportamento do mpv ao aplicar listas** (sem cortar o item atual): **validado na fase 1** (13/10/2026) com `playlist-clear` + `loadfile … append` (argumentos nomeados) e remoção da entrada antiga no `start-file` seguinte, no mpv 0.34.1 (WSL, `--vo=null`) e no mpv 0.40.0 do Pi 5 (`--vo=drm`). O teste é `player/tests/test_mpv_real.py`.
 - **Fuso horário:** `Europe/Lisbon` por omissão, configurável.
+- **Acesso de emergência do piloto** (14/11/2026): o WireGuard manual do piloto (`10.8.0.0/24`, portátil como peer, encaminhamento entre peers) é substituído pelo desenho de §6.4 (`10.77.0.0/16`, cada Pi só fala com o VPS, acesso por `ssh -J`), com migração em `docs/acesso-emergencia.md` §5. O Tailscale fica só no piloto, como acesso extra.
 - Existe experiência prévia com Raspberry Pi, Python e systemd.
 - Prioridade explícita: simplicidade e robustez acima de funcionalidades adicionais.

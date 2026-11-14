@@ -110,6 +110,9 @@ hotspot — assim a Pi já arranca ligada à rede e acessível por SSH.
   SSID/password do hotspot. Confirma que o hotspot está configurado para não
   desligar automaticamente por inatividade (muitos hotspots móveis fazem
   power-save agressivo).
+  > **Atualização:** no piloto o hotspot acabou ligado **por USB** (`cdc_ether`,
+  > interface `eth1`), não por Wi-Fi. Prioridade de rota e Wi-Fi de casa sem
+  > ligação automática: `docs/acesso-remoto-pi-tailscale-wireguard.md` §2.
 - **Boot**: `System Options → Boot / Auto Login` — define arranque direto
   para desktop com autologin (vai ser preciso para o player arrancar sozinho
   sem alguém ter de fazer login).
@@ -175,6 +178,11 @@ caminho mais simples para o portal de gestão (fase seguinte) comunicar com
 cada estação sem depender de IP público. Alternativas equivalentes:
 WireGuard próprio, ou o player fazer sempre polling de saída a um VPS (sem
 VPN, mas menos prático para debug remoto).
+
+> **Atualização:** a decisão final está na spec §6.4. O acesso de emergência é
+> WireGuard próprio para o VPS (`docs/acesso-emergencia.md`) e a comunicação com
+> o dashboard é sempre polling HTTPS de saída. O Tailscale ficou **só no piloto**,
+> como acesso extra (`docs/acesso-remoto-pi-tailscale-wireguard.md`).
 
 ## 8. Checklist final da Fase 1
 

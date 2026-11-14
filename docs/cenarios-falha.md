@@ -31,5 +31,6 @@ Critério de aceitação da fase 4: todos os cenários passam. **A** = teste aut
 - [ ] Alerta `disk_low` com o limiar temporariamente alto (`CORAL_ALERT_DISK_MIN_MB` acima do disco livre), resolvido ao repor.
 - [ ] healthchecks.io avisa com o dashboard parado (`systemctl stop coral-dashboard` durante > período + tolerância).
 - [ ] Backup manual (`systemctl start coral-backup`) e **restauro testado** com `verify-data` (`docs/backups-restauro.md` §3).
-- [ ] SSH ao p0 pelo túnel WireGuard.
+- [ ] SSH ao p0 pelo túnel WireGuard (`ssh -J`), com o Tailscale desligado no portátil (`tailscale down`).
+- [ ] Depois de um corte de corrente, o `wg-quick@wg0` volta sozinho (handshake recente em `sudo wg show` no VPS).
 - [ ] Watchdog: kernel panic de teste → reinício automático.

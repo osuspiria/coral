@@ -304,6 +304,8 @@ setup_wireguard() {
 [Interface]
 PrivateKey = $private
 Address = $WG_ADDRESS/32
+# Mobile networks often have a smaller path MTU: avoid fragmentation.
+MTU = 1280
 
 [Peer]
 PublicKey = $WG_SERVER_PUBKEY
@@ -311,6 +313,17 @@ Endpoint = $WG_ENDPOINT
 AllowedIPs = 10.77.0.1/32
 PersistentKeepalive = 25
 EOF
+    write_file /etc/systemd/system/wg-quick@wg0.service.d/10-signage.conf 644 <<'EOF'
+# CORAL: bring the emergency tunnel up after the network, retry if it fails (spec 6.4).
+[Unit]
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Restart=on-failure
+RestartSec=30
+EOF
+    run systemctl daemon-reload
     run systemctl enable wg-quick@wg0
     run systemctl restart wg-quick@wg0
 }

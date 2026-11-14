@@ -1,6 +1,6 @@
 # Instalação do player (Raspberry Pi 5)
 
-Pressupostos: Raspberry Pi OS **Lite** 64-bit instalado no SSD (Debian 12 ou 13), Wi-Fi ligado ao hotspot, acesso por teclado/ecrã ou SSH **durante a instalação**. A instalação faz-se com `deploy/pi/install.sh` (idempotente: pode correr outra vez sem estragar nada). A partir daí o código atualiza-se sozinho com releases assinadas (`docs/releases.md`).
+Pressupostos: Raspberry Pi OS **Lite** 64-bit instalado no SSD (Debian 12 ou 13), ligação ao hotspot (no piloto, por USB na `eth1`, ver `docs/acesso-remoto-pi-tailscale-wireguard.md` §2), acesso por teclado/ecrã ou SSH **durante a instalação**. A instalação faz-se com `deploy/pi/install.sh` (idempotente: pode correr outra vez sem estragar nada). A partir daí o código atualiza-se sozinho com releases assinadas (`docs/releases.md`).
 
 ## 0. No dashboard
 

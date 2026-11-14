@@ -124,7 +124,9 @@ def test_wireguard_only_plan(env):
     )
     assert result.returncode == 0, result.stderr
     assert "write /etc/wireguard/wg0.conf (600)" in result.stdout
-    assert "enable wg-quick@wg0" in result.stdout
+    assert "write /etc/systemd/system/wg-quick@wg0.service.d/10-signage.conf (644)" in result.stdout
+    out = result.stdout
+    assert out.index("daemon-reload") < out.index("enable wg-quick@wg0")
     assert "apt-get" not in result.stdout
 
 
