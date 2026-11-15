@@ -23,14 +23,14 @@ Critério de aceitação da fase 4: todos os cenários passam. **A** = teste aut
 | Release que falha o selftest | Não instalada; reportado | A *Linux* `test_updater.py::test_selftest_failure_is_rejected` |
 | Release que não arranca | Rollback automático ≈3 min; marcada como falhada | A *Linux* `test_updater.py::test_no_commit_rolls_back_after_deadline`, `test_e2e_update.py`; M fase 3 (0.3.3) |
 | Token revogado | Heartbeat 401; continua a tocar; deixa de sincronizar | A `test_agent.py::test_revoked_token_keeps_playing_cache`, `::test_heartbeat_401_keeps_playing_and_backs_off` |
-| Pi bloqueado por completo | Watchdog de hardware reinicia | M fase 4: `echo c \| sudo tee /proc/sysrq-trigger` (kernel panic de teste) → o Pi reinicia sozinho e volta a tocar |
+| Pi bloqueado por completo | Watchdog de hardware reinicia | M fase 4: `sudo sysctl -w kernel.panic=0` (para o kernel não reiniciar sozinho) e `echo c \| sudo tee /proc/sysrq-trigger` (kernel panic de teste) → o Pi reinicia sozinho e volta a tocar |
 
-## Checklist manual da fase 4 (no Pi e no VPS)
+## Checklist manual da fase 4 (no Pi e no VPS) — feita a 14–15/11/2026, registo na spec §10.3
 
-- [ ] Alerta `offline` chega ao telemóvel ~10 min depois de cortar a rede do Pi; `RESOLVED` ao voltar.
-- [ ] Alerta `disk_low` com o limiar temporariamente alto (`CORAL_ALERT_DISK_MIN_MB` acima do disco livre), resolvido ao repor.
-- [ ] healthchecks.io avisa com o dashboard parado (`systemctl stop coral-dashboard` durante > período + tolerância).
-- [ ] Backup manual (`systemctl start coral-backup`) e **restauro testado** com `verify-data` (`docs/backups-restauro.md` §3).
-- [ ] SSH ao p0 pelo túnel WireGuard (`ssh -J`), com o Tailscale desligado no portátil (`tailscale down`).
-- [ ] Depois de um corte de corrente, o `wg-quick@wg0` volta sozinho (handshake recente em `sudo wg show` no VPS).
-- [ ] Watchdog: kernel panic de teste → reinício automático.
+- [x] Alerta `offline` chega ao telemóvel ~10 min depois de cortar a rede do Pi; `RESOLVED` ao voltar.
+- [x] Alerta `disk_low` com o limiar temporariamente alto (`CORAL_ALERT_DISK_MIN_MB` acima do disco livre), resolvido ao repor.
+- [x] healthchecks.io avisa com o dashboard parado (`systemctl stop coral-dashboard` durante > período + tolerância).
+- [x] Backup manual (`systemctl start coral-backup`) e **restauro testado** com `verify-data` (`docs/backups-restauro.md` §3).
+- [x] SSH ao p0 pelo túnel WireGuard (`ssh -J`), com o Tailscale desligado no portátil (`tailscale down`).
+- [x] Depois de um corte de corrente, o `wg-quick@wg0` volta sozinho (handshake recente em `sudo wg show` no VPS).
+- [x] Watchdog: kernel panic de teste → reinício automático.

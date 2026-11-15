@@ -67,7 +67,7 @@ A especificação completa está em `docs/especificacao-tecnica.md` (v1.2). É a
 | 3 | Updater assinado, selftest, rollback, canais |
 | 4 | Alertas, backups, hardening, provisionamento, acesso de emergência (WireGuard) |
 
-**Fase atual: 4 — implementada, em validação** (fases 1 e 2 aceites a 13/10/2026, fase 3 a 14/10/2026; registos na spec §10.3). Falta a checklist manual de `docs/cenarios-falha.md` e o registo da aceitação. Não avances para a fase seguinte sem o critério de aceitação da atual cumprido (spec §10.3).
+**Fases 1–4 aceites** (1 e 2 a 13/10/2026, 3 a 14/10/2026, 4 a 15/11/2026; registos na spec §10.3). O sistema está em operação com o piloto `p0`: correções e afinações sim; funcionalidades novas só com pedido explícito (vão para a lista de evolução). Backups: restic para um Shared Drive do Google Workspace (`docs/backups-restauro.md`).
 
 ## Comandos úteis
 

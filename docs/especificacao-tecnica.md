@@ -526,6 +526,23 @@ Nota: com a playlist vazia no servidor, o `sync-now` não repara a cache, porque
 
 Problemas encontrados no Pi e corrigidos: o estado do update não aparecia na página do player (template); um ciclo de recargas do mpv "idle" a cada 10 s sem ser reportado (passou a exigir confirmação e a reiniciar o mpv ao fim de 3 recargas, 0.3.2); a confirmação de um update só era tentada no heartbeat e chegou a ~2 min do prazo de 3 min (passou a ser tentada também a cada verificação do mpv, 0.3.4).
 
+**Fase 4 — aceite em 15/11/2026**, no mesmo Pi 5 (`p0`, Debian 13 trixie), com agente 0.3.4 e o dashboard em produção. Checklist manual de `docs/cenarios-falha.md` feita a 14 e 15/11/2026:
+
+| Verificação | Resultado |
+|---|---|
+| Backup manual (restic → Shared Drive do Google Workspace, 790 MiB) e **restauro testado** com `verify-data` | OK (critério da fase) |
+| Alerta `disk_low` com o limiar temporariamente alto; `RESOLVED` ao repor | OK |
+| healthchecks.io avisa com o dashboard parado ~6 min e repõe ao arrancar; ecrã sem paragens | OK |
+| `ssh -J` pelo túnel WireGuard com o Tailscale desligado | OK |
+| Rede cortada ~15 min: alerta `offline` ~10 min depois, `RESOLVED` ao voltar; ecrã sem paragens | OK |
+| Watchdog: kernel panic de teste (`kernel.panic=0`) → reinício automático, a tocar de novo em ~1 min | OK |
+| Corte de corrente: volta a tocar da cache; `wg-quick@wg0` volta sozinho (handshake recente); chrony sincronizado | OK |
+| Cenários automáticos da secção 9 (`uv run pytest` no WSL, incluindo updater, minisign e mpv reais) | OK (311/311; ver nota) |
+
+Problemas encontrados e corrigidos: a configuração da fase 4 não tinha chegado à produção (o `git pull` não instala timers nem altera o Caddyfile, e o `p0` só tinha corrido o `install.sh --wireguard-only`), aplicada com `instalacao-vps.md` e `instalacao-pi.md` §6; no Pi 5 o `max_timeout` do watchdog é `0` (o kernel alimenta o hardware para aceitar tempos maiores) e o `install.sh` escreveria `RuntimeWatchdogSec=0s`, desligando-o — passou a usar 15 s quando o máximo é desconhecido; o restic corria sem cache por o systemd não definir `HOME` (`CacheDirectory` na unit); o destino dos backups passou da Hetzner Storage Box para um Shared Drive do Workspace (secção 3.5).
+
+Nota: o `test_mpv_real.py::test_real_mpv_does_not_interrupt_current_item` falhou uma vez na suite completa (`MpvError` de uma propriedade recusada pelo mpv) e passou em todas as repetições seguintes; parece dependente de tempos com a máquina carregada e fica por investigar.
+
 ---
 
 ## 11. Decisões e Pressupostos
